@@ -1,5 +1,4 @@
 import os
-import tempfile
 from typing import Optional, Tuple, List
 import dashscope
 from config.logger import setup_logging
@@ -63,7 +62,7 @@ class ASRProvider(ASRProviderBase):
             return None
 
     async def speech_to_text(
-        self, opus_data: List[bytes], session_id: str, audio_format="opus"
+        self, opus_data: List[bytes], session_id: str, artifacts=None
     ) -> Tuple[Optional[str], Optional[str]]:
     async def speech_to_text(
         self, opus_data: List[bytes], session_id: str, audio_format="opus"
@@ -71,7 +70,6 @@ class ASRProvider(ASRProviderBase):
         """Convert speech data to text"""
         temp_file_path = None
         file_path = None
-        
         try:
             # Decode audio data
             if audio_format == "pcm":

@@ -3,6 +3,10 @@
 import asyncio
 from config.logger import setup_logging
 from .iot_descriptor import IotDescriptor
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from core.connection import ConnectionHandler
 
 TAG = __name__
 logger = setup_logging()

@@ -1,3 +1,7 @@
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from core.connection import ConnectionHandler
 from core.handle.textMessageHandlerRegistry import TextMessageHandlerRegistry
 from core.handle.textMessageProcessor import TextMessageProcessor
 

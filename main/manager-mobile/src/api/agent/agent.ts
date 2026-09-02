@@ -2,8 +2,13 @@ import type {
   Agent,
   AgentCreateData,
   AgentDetail,
+  AgentSnapshot,
+  AgentSnapshotPageParams,
+  CorrectWordFile,
   ModelOption,
+  PageData,
   RoleTemplate,
+  TtsVoice,
 } from './types'
 import { http } from '@/http/request/alova'
 
@@ -85,7 +90,7 @@ export function deleteAgent(id: string) {
 
 // 获取TTS音色列表
 export function getTTSVoices(ttsModelId: string, voiceName: string = '') {
-  return http.Get<{ id: string, name: string }[]>(`/models/${ttsModelId}/voices`, {
+  return http.Get<TtsVoice[]>(`/models/${ttsModelId}/voices`, {
     params: {
       voiceName,
     },
@@ -100,7 +105,7 @@ export function getTTSVoices(ttsModelId: string, voiceName: string = '') {
 }
 
 // 更新智能体
-export function updateAgent(id: string, data: Partial<AgentDetail>) {
+export function updateAgent(id: string, data: Partial<AgentDetail> & { tagNames?: string[] }) {
   return http.Put(`/agent/${id}`, data, {
     meta: {
       ignoreAuth: false,
@@ -131,6 +136,7 @@ export function getMcpAddress(agentId: string) {
     meta: {
       ignoreAuth: false,
       toast: false,
+      isExposeError: true,
     },
   })
 }
@@ -180,6 +186,115 @@ export function createVoicePrint(data: { agentId: string, audioId: string, sourc
     meta: {
       ignoreAuth: false,
       toast: true,
+    },
+  })
+}
+
+// 获取智能体标签
+export function getAgentTags(agentId: string) {
+  return http.Get<any[]>(`/agent/${agentId}/tags`, {
+    meta: {
+      ignoreAuth: false,
+      toast: false,
+    },
+    cacheFor: {
+      expire: 0,
+    },
+  })
+}
+
+// 更新智能体标签
+export function updateAgentTags(agentId: string, data) {
+  return http.Put(`/agent/${agentId}/tags`, data, {
+    meta: {
+      ignoreAuth: false,
+      isExposeError: true,
+    },
+  })
+}
+
+// 获取所有语言
+export function getAllLanguage(modelId: string) {
+  return http.Get<TtsVoice[]>(`/models/${modelId}/voices`, {
+    meta: {
+      ignoreAuth: false,
+      toast: false,
+    },
+    cacheFor: {
+      expire: 0,
+    },
+  })
+}
+
+/**
+ * 获取克隆音色的临时播放ID
+ * @param cloneId 克隆音色记录ID
+ */
+export function getVoiceCloneAudioId(cloneId: string) {
+  return http.Post<string>(`/voiceClone/audio/${cloneId}`, {}, {
+    meta: {
+      ignoreAuth: false,
+      toast: false,
+    },
+  })
+}
+
+// 获取智能体历史版本列表
+export function getAgentSnapshots(agentId: string, params: AgentSnapshotPageParams) {
+  return http.Get<PageData<AgentSnapshot>>(`/agent/${agentId}/snapshots`, {
+    params,
+    meta: {
+      ignoreAuth: false,
+      toast: false,
+    },
+    cacheFor: {
+      expire: 0,
+    },
+  })
+}
+
+// 获取智能体历史版本详情
+export function getAgentSnapshot(agentId: string, snapshotId: string) {
+  return http.Get<AgentSnapshot>(`/agent/${agentId}/snapshots/${snapshotId}`, {
+    meta: {
+      ignoreAuth: false,
+      toast: false,
+    },
+    cacheFor: {
+      expire: 0,
+    },
+  })
+}
+
+// 恢复智能体历史版本
+export function restoreAgentSnapshot(agentId: string, snapshotId: string, currentStateToken: string) {
+  return http.Post(`/agent/${agentId}/snapshots/${snapshotId}/restore`, { currentStateToken }, {
+    meta: {
+      ignoreAuth: false,
+      toast: false,
+    },
+  })
+}
+
+// 删除智能体历史版本
+export function deleteAgentSnapshot(agentId: string, snapshotId: string) {
+  return http.Delete(`/agent/${agentId}/snapshots/${snapshotId}`, {
+    meta: {
+      ignoreAuth: false,
+      toast: false,
+    },
+  })
+}
+
+// 获取所有替换词文件
+export function getCorrectWordFiles() {
+  return http.Get<CorrectWordFile[]>('/correct-word/file/select', {
+    meta: {
+      ignoreAuth: false,
+      toast: false,
+    },
+    cacheFor: {
+      expire: 0,
     },
   })
 }

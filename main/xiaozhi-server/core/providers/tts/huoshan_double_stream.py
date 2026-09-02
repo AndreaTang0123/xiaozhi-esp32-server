@@ -7,11 +7,10 @@ import traceback
 import websockets
 
 from typing import Callable, Any
-from core.utils.tts import MarkdownCleaner
 from config.logger import setup_logging
-from core.utils import opus_encoder_utils
 from core.utils.util import check_model_key
 from core.providers.tts.base import TTSProviderBase
+from core.utils.tts import MarkdownCleaner, convert_percentage_to_range
 from core.providers.tts.dto.dto import SentenceType, ContentType, InterfaceType
 
 
@@ -149,6 +148,8 @@ class TTSProvider(TTSProviderBase):
         self.access_token = config.get("access_token")
         self.cluster = config.get("cluster")
         self.resource_id = config.get("resource_id")
+        self.resource_type = True if self.resource_id == "seed-tts-2.0" else False
+        self.report_on_last = self.resource_type
         self.activate_session = False
         if config.get("private_voice"):
             self.voice = config.get("private_voice")
@@ -171,9 +172,7 @@ class TTSProvider(TTSProviderBase):
         enable_ws_reuse_value = config.get("enable_ws_reuse", True)
         self.enable_ws_reuse = False if str(enable_ws_reuse_value).lower() == 'false' else True
         self.tts_text = ""
-        self.opus_encoder = opus_encoder_utils.OpusEncoderUtils(
-            sample_rate=16000, channels=1, frame_size_ms=60
-        )
+
         model_key_msg = check_model_key("TTS", self.access_token)
         if model_key_msg:
             logger.bind(tag=TAG).error(model_key_msg)
@@ -181,6 +180,8 @@ class TTSProvider(TTSProviderBase):
     async def open_audio_channels(self, conn):
         try:
             await super().open_audio_channels(conn)
+            # 更新 audio_params 中的采样率为实际的 conn.sample_rate
+            self.audio_params["sample_rate"] = conn.sample_rate
         except Exception as e:
             logger.bind(tag=TAG).error(f"Failed to open audio channels: {str(e)}")
             self.ws = None
@@ -267,6 +268,14 @@ class TTSProvider(TTSProviderBase):
                         logger.bind(tag=TAG).error(f"Failed to cancel TTS session: {str(e)}")
                         continue
 
+                # 过滤旧消息：检查sentence_id是否匹配
+                if message.sentence_id != self.conn.sentence_id:
+                    continue
+
+                logger.bind(tag=TAG).debug(
+                    f"收到TTS任务｜{message.sentence_type.name} ｜ {message.content_type.name} | 会话ID: {message.sentence_id}"
+                )
+
                 if message.sentence_type == SentenceType.FIRST:
                     # Initialize parameters
                     try:
@@ -279,7 +288,7 @@ class TTSProvider(TTSProviderBase):
                             self.start_session(self.conn.sentence_id),
                             loop=self.conn.loop,
                         )
-                        future.result()
+                        future.result(timeout=self.tts_timeout)
                         self.before_stop_play_files.clear()
                         logger.bind(tag=TAG).debug("TTS session started successfully")
                     except Exception as e:
@@ -316,7 +325,7 @@ class TTSProvider(TTSProviderBase):
                             self.finish_session(self.conn.sentence_id),
                             loop=self.conn.loop,
                         )
-                        future.result()
+                        future.result(timeout=self.tts_timeout)
                     except Exception as e:
                         logger.bind(tag=TAG).error(f"Failed to end TTS session: {str(e)}")
                         continue
@@ -483,7 +492,7 @@ class TTSProvider(TTSProviderBase):
                     if res.optional.event == EVENT_SessionCanceled:
                         logger.bind(tag=TAG).debug(f"Released server resources successfully~~")
                         self.activate_session = False
-                    elif res.optional.event == EVENT_TTSSentenceStart:
+                    elif not self.resource_type and res.optional.event == EVENT_TTSSentenceStart:
                         json_data = json.loads(res.payload.decode("utf-8"))
                         self.tts_text = json_data.get("text", "")
                         logger.bind(tag=TAG).debug(f"Sentence voice generation start: {self.tts_text}")
@@ -494,6 +503,17 @@ class TTSProvider(TTSProviderBase):
                         res.optional.event == EVENT_TTSResponse
                         and res.header.message_type == AUDIO_ONLY_RESPONSE
                     ):
+                        # 处理seed-tts-2.0文本字幕
+                        if self.resource_type:
+                            tts_text = self.get_tts_text(self.conn.sentence_id)
+                            if tts_text:
+                                logger.bind(tag=TAG).info(
+                                    f"句子语音生成成功： {tts_text}"
+                                )
+                                self.tts_audio_queue.put(
+                                    (SentenceType.FIRST, [], tts_text)
+                                )
+                                self.clear_tts_text(self.conn.sentence_id)
                         self.wav_to_opus_data_audio_raw_stream(res.payload, callback=self.handle_opus)
                     elif res.optional.event == EVENT_TTSSentenceEnd:
                         logger.bind(tag=TAG).info(f"Sentence voice generation successful: {self.tts_text}")
@@ -646,13 +666,13 @@ class TTSProvider(TTSProviderBase):
         text="",
         speaker="",
         audio_format="pcm",
-        audio_sample_rate=16000,
     ):
-        audio_params = {
-            "format": audio_format,
-            "sample_rate": audio_sample_rate,
-            "speech_rate": self.speech_rate,
-            "loudness_rate": self.loudness_rate
+        # 构建 req_params
+        req_params = {
+            "text": text,
+            "speaker": speaker,
+            "audio_params": {**self.audio_params, "format": audio_format},
+            "additions": json.dumps(self.additions)
         }
 
         # If multi-emotion voice, add emotion parameters
@@ -667,23 +687,39 @@ class TTSProvider(TTSProviderBase):
                     "user": {"uid": uid},
                     "event": event,
                     "namespace": "BidirectionalTTS",
-                    "req_params": {
-                        "text": text,
-                        "speaker": speaker,
-                        "audio_params": audio_params,
-                        "additions": json.dumps({
-                            "post_process": {
-                                "pitch": self.pitch
-                            }
-                        })
-                    },
-
+                    "req_params": req_params
                 }
             )
         )
 
+    def audio_to_opus_data_stream(
+        self, audio_file_path, callback: Callable[[Any], Any] = None
+    ):
+        """重写父类方法：使用独立的临时编码器处理音频文件，避免与TTS流式编码器并发冲突。
+        双流式TTS中，monitor任务在event loop线程接收TTS音频并使用self.opus_encoder编码，
+        同时tts_text_priority_thread处理音乐文件也使用self.opus_encoder，
+        共享的encoder.buffer非线程安全，并发访问会导致SILK resampler断言失败。
+        """
+        from core.utils.util import audio_to_data_stream
+        return audio_to_data_stream(
+            audio_file_path, is_opus=True, callback=callback,
+            sample_rate=self.conn.sample_rate, opus_encoder=None
+        )
+
     def wav_to_opus_data_audio_raw_stream(self, raw_data_var, is_end=False, callback: Callable[[Any], Any]=None):
         return self.opus_encoder.encode_pcm_to_opus_stream(raw_data_var, is_end, callback=callback)
+
+    async def _cancel_monitor_task(self):
+        """取消监听任务"""
+        if self._monitor_task and not self._monitor_task.done():
+            self._monitor_task.cancel()
+            try:
+                await self._monitor_task
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                logger.bind(tag=TAG).warning(f"取消监听任务错误: {e}")
+        self._monitor_task = None
 
     def to_tts(self, text: str) -> list:
         """Non-streaming audio generation, used for generating audio and testing scenarios

@@ -2,8 +2,11 @@ import json
 import uuid
 import asyncio
 import websockets
-import opuslib_next
-from typing import List
+from typing import List, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from core.connection import ConnectionHandler
+
 from config.logger import setup_logging
 from core.providers.asr.base import ASRProviderBase
 from core.providers.asr.dto.dto import InterfaceType
@@ -18,7 +21,6 @@ class ASRProvider(ASRProviderBase):
         self.interface_type = InterfaceType.STREAM
         self.config = config
         self.text = ""
-        self.decoder = opuslib_next.Decoder(16000, 1)
         self.asr_ws = None
         self.forward_task = None
         self.is_processing = False
@@ -166,6 +168,8 @@ class ASRProvider(ASRProviderBase):
         """Forward recognition results"""
         try:
             while not conn.stop_event.is_set():
+                # 获取当前连接的音频数据
+                audio_data = conn.asr_audio
                 try:
                     response = await asyncio.wait_for(self.asr_ws.recv(), timeout=1.0)
                     result = json.loads(response)
@@ -181,10 +185,9 @@ class ASRProvider(ASRProviderBase):
 
                         # Send cached audio
                         if conn.asr_audio:
-                            for cached_audio in conn.asr_audio[-10:]:
+                            for cached_pcm in conn.asr_audio[-10:]:
                                 try:
-                                    pcm_frame = self.decoder.decode(cached_audio, 960)
-                                    await self.asr_ws.send(pcm_frame)
+                                    await self.asr_ws.send(cached_pcm)
                                 except Exception as e:
                                     logger.bind(tag=TAG).warning(f"Failed to send cached audio: {e}")
                                     break
@@ -225,8 +228,6 @@ class ASRProvider(ASRProviderBase):
                             else:
                                 # Overwrite directly in auto mode
                                 self.text = text
-                                conn.reset_vad_states()
-                                audio_data = getattr(conn, 'asr_audio_for_voiceprint', [])
                                 await self.handle_voice_stop(conn, audio_data)
                                 break
 
@@ -257,11 +258,7 @@ class ASRProvider(ASRProviderBase):
         finally:
             # Clean up connected audio cache
             await self._cleanup()
-            if conn:
-                if hasattr(conn, 'asr_audio_for_voiceprint'):
-                    conn.asr_audio_for_voiceprint = []
-                if hasattr(conn, 'asr_audio'):
-                    conn.asr_audio = []
+            conn.reset_audio_states()
 
     async def _send_stop_request(self):
         """Send stop request (for manual mode stop recording)"""

@@ -3,10 +3,13 @@ import gzip
 import uuid
 import asyncio
 import websockets
-import opuslib_next
 from core.providers.asr.base import ASRProviderBase
 from config.logger import setup_logging
 from core.providers.asr.dto.dto import InterfaceType
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from core.connection import ConnectionHandler
 
 TAG = __name__
 logger = setup_logging()
@@ -18,15 +21,16 @@ class ASRProvider(ASRProviderBase):
         self.interface_type = InterfaceType.STREAM
         self.config = config
         self.text = ""
-        self.decoder = opuslib_next.Decoder(16000, 1)
         self.asr_ws = None
         self.forward_task = None
         self.is_processing = False  # Add processing status flag
 
         # Configuration parameters
         self.appid = str(config.get("appid"))
-        self.cluster = config.get("cluster")
         self.access_token = config.get("access_token")
+        # 资源ID，用于区分不同的ASR模型（默认1.0模型小时版，v2版本使用seed-asr）
+        self.resource_id = config.get("resource_id", "volc.bigasr.sauc.duration")
+
         self.boosting_table_name = config.get("boosting_table_name", "")
         self.correct_table_name = config.get("correct_table_name", "")
         self.output_dir = config.get("output_dir", "tmp/")
@@ -34,11 +38,13 @@ class ASRProvider(ASRProviderBase):
 
         # Volcengine ASR configuration
         enable_multilingual = config.get("enable_multilingual", False)
-        self.enable_multilingual = False if str(enable_multilingual).lower() == 'false' else True
+        self.enable_multilingual = (
+            False if str(enable_multilingual).lower() == "false" else True
+        )
         if self.enable_multilingual:
             self.ws_url = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_nostream"
         else:
-            self.ws_url = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel"
+            self.ws_url = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async"
         self.uid = config.get("uid", "streaming_asr_service")
         self.workflow = config.get(
             "workflow", "audio_in,resample,partition,vad,fe,decode,itn,nlu_punctuate"
@@ -123,10 +129,9 @@ class ASRProvider(ASRProviderBase):
 
                 # Send cached audio data
                 if conn.asr_audio and len(conn.asr_audio) > 0:
-                    for cached_audio in conn.asr_audio[-10:]:
+                    for cached_pcm in conn.asr_audio[-10:]:
                         try:
-                            pcm_frame = self.decoder.decode(cached_audio, 960)
-                            payload = gzip.compress(pcm_frame)
+                            payload = gzip.compress(cached_pcm)
                             audio_request = bytearray(
                                 self.generate_audio_default_header()
                             )
@@ -151,7 +156,6 @@ class ASRProvider(ASRProviderBase):
         # Send current audio data
         if self.asr_ws and self.is_processing:
             try:
-                pcm_frame = self.decoder.decode(audio, 960)
                 payload = gzip.compress(pcm_frame)
                 audio_request = bytearray(self.generate_audio_default_header())
                 audio_request.extend(len(payload).to_bytes(4, "big"))
@@ -160,7 +164,7 @@ class ASRProvider(ASRProviderBase):
             except Exception as e:
                 logger.bind(tag=TAG).info(f"Error sending audio data: {e}")
 
-    async def _forward_asr_results(self, conn):
+    async def _forward_asr_results(self, conn: "ConnectionHandler"):
         try:
             while self.asr_ws and not conn.stop_event.is_set():
                 # Get audio data of current connection
@@ -262,17 +266,16 @@ class ASRProvider(ASRProviderBase):
                 await self.asr_ws.close()
                 self.asr_ws = None
             self.is_processing = False
-            if conn:
-                if hasattr(conn, 'asr_audio_for_voiceprint'):
-                    conn.asr_audio_for_voiceprint = []
-                if hasattr(conn, 'asr_audio'):
-                    conn.asr_audio = []
+            self._is_stopping = False
+            # 重置所有音频相关状态
+            conn.reset_audio_states()
 
     def stop_ws_connection(self):
         if self.asr_ws:
             asyncio.create_task(self.asr_ws.close())
             self.asr_ws = None
         self.is_processing = False
+        self._is_stopping = False
 
     async def _send_stop_request(self):
         """Send last audio frame to notify server to end"""
@@ -280,7 +283,9 @@ class ASRProvider(ASRProviderBase):
             try:
                 # Send audio frame with end marker (gzip compressed empty data)
                 empty_payload = gzip.compress(b"")
-                last_audio_request = bytearray(self.generate_last_audio_default_header())
+                last_audio_request = bytearray(
+                    self.generate_last_audio_default_header()
+                )
                 last_audio_request.extend(len(empty_payload).to_bytes(4, "big"))
                 last_audio_request.extend(empty_payload)
                 await self.asr_ws.send(last_audio_request)
@@ -292,7 +297,6 @@ class ASRProvider(ASRProviderBase):
         req = {
             "app": {
                 "appid": self.appid,
-                "cluster": self.cluster,
                 "token": self.access_token,
             },
             "user": {"uid": self.uid},
@@ -302,9 +306,11 @@ class ASRProvider(ASRProviderBase):
                 "show_utterances": True,
                 "result_type": self.result_type,
                 "sequence": 1,
-                "boosting_table_name": self.boosting_table_name,
-                "correct_table_name": self.correct_table_name,
                 "end_window_size": self.end_window_size,
+                "corpus": {
+                    "boosting_table_name": self.boosting_table_name,
+                    "correct_table_name": self.correct_table_name,
+                }
             },
             "audio": {
                 "format": self.format,
@@ -329,7 +335,7 @@ class ASRProvider(ASRProviderBase):
         return {
             "X-Api-App-Key": self.appid,
             "X-Api-Access-Key": self.access_token,
-            "X-Api-Resource-Id": "volc.bigasr.sauc.duration",
+            "X-Api-Resource-Id": self.resource_id,
             "X-Api-Connect-Id": str(uuid.uuid4()),
         }
 
@@ -394,7 +400,15 @@ class ASRProvider(ASRProviderBase):
 
             # Get JSON data (skip 12 bytes header)
             try:
-                json_data = res[12:].decode("utf-8")
+                # 检查字节8-11是否为有效的JSON长度字段
+                # 格式：4字节头 + 4字节序列号 + 4字节长度 + JSON数据
+                length = int.from_bytes(res[8:12], "big")
+                if length > 0 and length <= len(res) - 12:
+                    # 有长度字段，从字节12开始读取指定长度的JSON
+                    json_data = res[12:12 + length].decode("utf-8")
+                else:
+                    # 无长度字段或长度无效，尝试直接解析
+                    json_data = res[8:].decode("utf-8")
                 result = json.loads(json_data)
                 logger.bind(tag=TAG).debug(f"Successfully parsed JSON response: {result}")
                 return {"payload_msg": result}
@@ -408,7 +422,7 @@ class ASRProvider(ASRProviderBase):
             logger.bind(tag=TAG).error(f"Original response data: {res.hex()}")
             raise
 
-    async def speech_to_text(self, opus_data, session_id, audio_format):
+    async def speech_to_text(self, opus_data, session_id, artifacts=None):
         result = self.text
         self.text = ""  # Clear text
         return result, None
@@ -426,20 +440,3 @@ class ASRProvider(ASRProviderBase):
                 pass
             self.forward_task = None
         self.is_processing = False
-        
-        # 显式释放decoder资源
-        if hasattr(self, 'decoder') and self.decoder is not None:
-            try:
-                del self.decoder
-                self.decoder = None
-                logger.bind(tag=TAG).debug("Doubao decoder resources released")
-            except Exception as e:
-                logger.bind(tag=TAG).debug(f"释放Doubao decoder资源时出错: {e}")
-
-        # 清理所有连接的音频缓冲区
-        if hasattr(self, '_connections'):
-            for conn in self._connections.values():
-                if hasattr(conn, 'asr_audio_for_voiceprint'):
-                    conn.asr_audio_for_voiceprint = []
-                if hasattr(conn, 'asr_audio'):
-                    conn.asr_audio = []

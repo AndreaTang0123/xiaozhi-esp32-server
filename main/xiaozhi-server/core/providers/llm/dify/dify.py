@@ -27,19 +27,29 @@ class LLMProvider(LLMProviderBase):
 
             # Initiate streaming request
             if self.mode == "chat-messages":
-                request_json = {
-                    "query": last_msg["content"],
-                    "response_mode": "streaming",
-                    "user": session_id,
-                    "inputs": {},
-                    "conversation_id": conversation_id,
-                }
+                for line in r.iter_lines():
+                    if line.startswith(b"data: "):
+                        event = json.loads(line[6:])
+                        # 如果没有找到conversation_id，则获取此次conversation_id
+                        if not conversation_id:
+                            conversation_id = event.get("conversation_id")
+                            self.session_conversation_map[session_id] = (
+                                conversation_id  # 更新映射
+                            )
+                        # 过滤 message_replace 事件，此事件会全量推一次
+                        if event.get("event") != "message_replace" and event.get(
+                            "answer"
+                        ):
+                            yield event["answer"]
             elif self.mode == "workflows/run":
-                request_json = {
-                    "inputs": {"query": last_msg["content"]},
-                    "response_mode": "streaming",
-                    "user": session_id,
-                }
+                for line in r.iter_lines():
+                    if line.startswith(b"data: "):
+                        event = json.loads(line[6:])
+                        if event.get("event") == "workflow_finished":
+                            if event["data"]["status"] == "succeeded":
+                                yield event["data"]["outputs"]["answer"]
+                            else:
+                                yield "【服务响应异常】"
             elif self.mode == "completion-messages":
                 request_json = {
                     "inputs": {"query": last_msg["content"]},

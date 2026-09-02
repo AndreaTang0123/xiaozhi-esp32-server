@@ -1,11 +1,16 @@
 import json
 import uuid
 import asyncio
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from core.connection import ConnectionHandler
 from core.utils.dialogue import Message
 from core.providers.tts.dto.dto import ContentType
 from core.handle.helloHandle import checkWakeupWords
 from plugins_func.register import Action, ActionResponse
 from core.handle.sendAudioHandle import send_stt_message
+from core.handle.reportHandle import enqueue_tool_report
 from core.utils.util import remove_punctuation_and_length
 from core.utils.exit_handler import is_exit_command, handle_exit
 from core.providers.tts.dto.dto import TTSMessageDTO, SentenceType
@@ -16,7 +21,7 @@ TAG = __name__
 async def handle_user_intent(conn, text):
     # Preprocess input text, handle potential JSON format
     try:
-        if text.strip().startswith('{') and text.strip().endswith('}'):
+        if text.strip().startswith("{") and text.strip().endswith("}"):
             parsed_data = json.loads(text)
             if isinstance(parsed_data, dict) and "content" in parsed_data:
                 text = parsed_data["content"]  # Extract content for intent analysis
@@ -93,10 +98,10 @@ async def process_intent_result(conn, intent_result, original_text):
             if function_name == "result_for_context":
                 await send_stt_message(conn, original_text)
                 conn.client_abort = False
-                
+
                 def process_context_result():
                     conn.dialogue.put(Message(role="user", content=original_text))
-                    
+
                     from core.utils.current_time import get_current_time_info
 
                     current_time, today_date, today_weekday, lunar_date = get_current_time_info()
@@ -147,14 +152,17 @@ async def process_intent_result(conn, intent_result, original_text):
                             conn, function_call_data
                         ),
                         conn.loop,
-                    ).result()
+                    ).result(timeout=tool_call_timeout)
                 except Exception as e:
                     conn.logger.bind(tag=TAG).error(f"工具调用失败: {e}")
                     result = ActionResponse(
-                        action=Action.ERROR, result=str(e), response=str(e)
+                        action=Action.ERROR, result="工具调用超时，请一会再试下哈", response="工具调用超时，请一会再试下哈"
                     )
 
+                # 上报工具调用结果
                 if result:
+                    enqueue_tool_report(conn, function_name, tool_input, str(result.result) if result.result else None, report_tool_call=False)
+
                     if result.action == Action.RESPONSE:  # 直接回复前端
                         text = result.response
                         if text is not None:
@@ -163,7 +171,15 @@ async def process_intent_result(conn, intent_result, original_text):
                         text = result.result
                         conn.logger.bind(tag=TAG).info(f"Tool output for LLM generation: {text}")
                         conn.dialogue.put(Message(role="tool", content=text))
-                        llm_result = conn.intent.replyResult(text, original_text)
+                        # 使用异步调用避免阻塞事件循环，影响其他设备的音频播放
+                        try:
+                            llm_result = asyncio.run_coroutine_threadsafe(
+                                conn.intent.replyResult(text, original_text),
+                                conn.loop,
+                            ).result()
+                        except Exception as e:
+                            conn.logger.bind(tag=TAG).error(f"LLM生成回复失败: {e}")
+                            llm_result = text
                         if llm_result is None:
                             llm_result = text
                         speak_txt(conn, llm_result)

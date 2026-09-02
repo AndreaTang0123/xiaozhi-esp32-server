@@ -211,14 +211,13 @@ class ASRProvider(ASRProviderBase):
             return None
 
     async def speech_to_text(
-        self, opus_data: List[bytes], session_id: str, audio_format="opus"
+        self, opus_data: List[bytes], session_id: str, artifacts=None
     ) -> Tuple[Optional[str], Optional[str]]:
         """Convert speech data to text"""
         if self._is_token_expired():
             logger.warning("Token expired, refreshing automatically...")
             self._refresh_token()
 
-        file_path = None
         try:
             # Decode Opus to PCM
             if audio_format == "pcm":
@@ -237,9 +236,9 @@ class ASRProvider(ASRProviderBase):
             text = await self._send_request(combined_pcm_data)
 
             if text:
-                return text, file_path
+                return text, artifacts.file_path
 
-            return "", file_path
+            return "", artifacts.file_path
 
         except Exception as e:
             logger.bind(tag=TAG).error(f"Speech recognition failed: {e}", exc_info=True)

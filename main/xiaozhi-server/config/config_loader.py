@@ -1,7 +1,15 @@
 import os
+import asyncio
 import yaml
 from collections.abc import Mapping
-from config.manage_api_client import init_service, get_server_config, get_agent_models
+from config.manage_api_client import (
+    init_service,
+    get_server_config,
+    get_agent_models,
+    get_correct_words,
+    DeviceNotFoundException,
+    DeviceBindException,
+)
 
 
 def get_project_dir():
@@ -113,7 +121,7 @@ def ensure_directories(config):
         selected_provider = selected_modules.get(module_type)
         if not selected_provider:
             continue
-        if config.get(module) is None:
+        if config.get(module_type) is None:
             continue
         if config.get(selected_provider) is None:
             continue

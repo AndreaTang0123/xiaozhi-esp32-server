@@ -47,12 +47,12 @@ class LLMProvider(LLMProviderBase):
 
             # Parse return data
             data = response.json()
-            speech = (
-                data.get("response", {})
-                .get("speech", {})
-                .get("plain", {})
-                .get("speech", "")
-            )
+        speech = (
+            data.get("response", {})
+            .get("speech", {})
+            .get("plain", {})
+            .get("speech", "")
+        )
 
             # Return generated content
             if speech:

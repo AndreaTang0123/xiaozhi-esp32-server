@@ -4,9 +4,19 @@ from openai.types import CompletionUsage
 from config.logger import setup_logging
 from core.utils.util import check_model_key
 from core.providers.llm.base import LLMProviderBase
+from urllib.parse import urlparse
 
 TAG = __name__
 logger = setup_logging()
+
+# 需要禁用思考模式的平台域名及其对应参数（默认关闭思考模式）
+THINKING_DISABLED_DOMAINS = {
+    "aliyuncs.com": {"enable_thinking": False},
+    "deepseek.com": {"thinking": {"type": "disabled"}},
+    "bigmodel.cn": {"thinking": {"type": "disabled"}},
+    "moonshot.cn": {"thinking": {"type": "disabled"}},
+    "volces.com": {"thinking": {"type": "disabled"}},
+}
 
 
 class LLMProvider(LLMProviderBase):
@@ -68,15 +78,24 @@ class LLMProvider(LLMProviderBase):
                 msg["content"] = ""
         return dialogue
 
-    def response(self, session_id, dialogue, **kwargs):
-        try:
-            dialogue = self.normalize_dialogue(dialogue)
+    def _apply_thinking_disabled(self, request_params: dict):
+        """根据域名自动禁用思考模式"""
+        parsed_url = urlparse(self.base_url)
+        domain = parsed_url.netloc
+        for disabled_domain, params in THINKING_DISABLED_DOMAINS.items():
+            if disabled_domain in domain:
+                request_params.setdefault("extra_body", {}).update(params)
+                logger.bind(tag=TAG).info(f"为域名 {domain} 禁用思考模式，参数: {params}")
+                break
 
-            request_params = {
-                "model": self.model_name,
-                "messages": dialogue,
-                "stream": True,
-            }
+    def response(self, session_id, dialogue, **kwargs):
+        dialogue = self.normalize_dialogue(dialogue)
+
+        request_params = {
+            "model": self.model_name,
+            "messages": dialogue,
+            "stream": True,
+        }
 
             # Prepare extra_body, starting with generic extra_body from config
             final_extra_body = getattr(self, "extra_body_config", {}).copy()
@@ -101,9 +120,9 @@ class LLMProvider(LLMProviderBase):
                 "response_format": kwargs.get("response_format"),
             }
 
-            for key, value in optional_params.items():
-                if value is not None:
-                    request_params[key] = value
+        for key, value in optional_params.items():
+            if value is not None:
+                request_params[key] = value
 
 
             
@@ -132,7 +151,10 @@ class LLMProvider(LLMProviderBase):
                 timeout=request_timeout
             )
 
-            is_active = True
+        responses = self.client.chat.completions.create(**request_params)
+
+        is_active = True
+        try:            
             for chunk in responses:
                 try:
                     delta = chunk.choices[0].delta if getattr(chunk, "choices", None) else None
@@ -148,11 +170,35 @@ class LLMProvider(LLMProviderBase):
                         content = content.split("</think>")[-1]
                     if is_active:
                         yield content
-
-        except Exception as e:
-            logger.bind(tag=TAG).error(f"Error in response generation: {e}")
+        finally:
+            responses.close()
 
     def response_with_functions(self, session_id, dialogue, functions=None, **kwargs):
+        dialogue = self.normalize_dialogue(dialogue)
+
+        request_params = {
+            "model": self.model_name,
+            "messages": dialogue,
+            "stream": True,
+            "tools": functions,
+        }
+
+        optional_params = {
+            "max_tokens": kwargs.get("max_tokens", self.max_tokens),
+            "temperature": kwargs.get("temperature", self.temperature),
+            "top_p": kwargs.get("top_p", self.top_p),
+            "frequency_penalty": kwargs.get("frequency_penalty", self.frequency_penalty),
+        }
+
+        for key, value in optional_params.items():
+            if value is not None:
+                request_params[key] = value
+
+        # 禁用思考模式
+        self._apply_thinking_disabled(request_params)
+
+        stream = self.client.chat.completions.create(**request_params)
+
         try:
             dialogue = self.normalize_dialogue(dialogue)
 

@@ -30,7 +30,7 @@ class ASRProvider(ASRProviderBase):
         os.makedirs(self.output_dir, exist_ok=True)
 
     async def speech_to_text(
-        self, opus_data: List[bytes], session_id: str, audio_format="opus"
+        self, opus_data: List[bytes], session_id: str, artifacts=None
     ) -> Tuple[Optional[str], Optional[str]]:
     async def speech_to_text(
         self, opus_data: List[bytes], session_id: str, audio_format="opus"
@@ -40,7 +40,6 @@ class ASRProvider(ASRProviderBase):
             logger.bind(tag=TAG).warning("Audio data is empty!")
             return None, None
 
-        file_path = None
         try:
             # Check if configuration is set
             if not self.app_id or not self.api_key or not self.secret_key:
@@ -63,7 +62,7 @@ class ASRProvider(ASRProviderBase):
             start_time = time.time()
             # Recognize local file
             result = self.client.asr(
-                combined_pcm_data,
+                artifacts.pcm_bytes,
                 "pcm",
                 16000,
                 {
@@ -76,12 +75,12 @@ class ASRProvider(ASRProviderBase):
                     f"Baidu speech recognition time: {time.time() - start_time:.3f}s | Result: {result}"
                 )
                 result = result["result"][0]
-                return result, file_path
+                return result, artifacts.file_path
             else:
                 raise Exception(
                     f"Baidu speech recognition failed, error code: {result['err_no']}, error message: {result['err_msg']}"
                 )
-                return None, file_path
+                return None, artifacts.file_path
 
         except Exception as e:
             logger.bind(tag=TAG).error(f"Error occurred while processing audio! {e}", exc_info=True)

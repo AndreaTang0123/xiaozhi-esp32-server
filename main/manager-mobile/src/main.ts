@@ -9,7 +9,12 @@ import 'virtual:uno.css'
 
 // Import i18n related functions
 import { initI18n } from './i18n'
-import { useLangStore } from './store/lang'
+
+import { routeInterceptor } from './router/interceptor'
+import store from './store'
+
+import '@/style/index.scss'
+import 'virtual:uno.css'
 
 export function createApp() {
   const app = createSSRApp(App)

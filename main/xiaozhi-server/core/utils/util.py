@@ -258,7 +258,7 @@ def extract_json_from_string(input_string):
 
 
 def audio_to_data_stream(
-    audio_file_path, is_opus=True, callback: Callable[[Any], Any] = None
+    audio_file_path, is_opus=True, callback: Callable[[Any], Any] = None, sample_rate=16000, opus_encoder=None
 ) -> None:
     # Get file extension
     file_type = os.path.splitext(audio_file_path)[1]
@@ -276,7 +276,7 @@ def audio_to_data_stream(
 
     # Get raw PCM data (16-bit little endian)
     raw_data = audio.raw_data
-    pcm_to_data_stream(raw_data, is_opus, callback)
+    pcm_to_data_stream(raw_data, is_opus, callback, sample_rate, opus_encoder)
 
 
 async def audio_to_data(
@@ -360,7 +360,7 @@ async def audio_to_data(
 
 
 def audio_bytes_to_data_stream(
-    audio_bytes, file_type, is_opus, callback: Callable[[Any], Any]
+    audio_bytes, file_type, is_opus, callback: Callable[[Any], Any], sample_rate=16000, opus_encoder=None
 ) -> None:
     """
     Directly convert audio binary data to opus/pcm data, supports wav, mp3, p3
@@ -377,7 +377,7 @@ def audio_bytes_to_data_stream(
         # Append 200ms silence to prevent voxing
         audio += AudioSegment.silent(duration=200)
         raw_data = audio.raw_data
-        pcm_to_data_stream(raw_data, is_opus, callback)
+        pcm_to_data_stream(raw_data, is_opus, callback, sample_rate, opus_encoder)
 
 
 def pcm_to_data_stream(raw_data, is_opus=True, callback: Callable[[Any], Any] = None):
@@ -386,7 +386,7 @@ def pcm_to_data_stream(raw_data, is_opus=True, callback: Callable[[Any], Any] = 
 
     # Encoding parameters
     frame_duration = 60  # 60ms per frame
-    frame_size = int(16000 * frame_duration / 1000)  # 960 samples/frame
+    frame_size = int(sample_rate * frame_duration / 1000)  # samples/frame
 
     # Process all audio data frame by frame (including padding zero for last frame)
     for i in range(0, len(raw_data), frame_size * 2):  # 16bit=2bytes/sample
@@ -404,6 +404,7 @@ def pcm_to_data_stream(raw_data, is_opus=True, callback: Callable[[Any], Any] = 
             frame_data = encoder.encode(np_frame.tobytes(), frame_size)
             callback(frame_data)
         else:
+            # PCM模式,直接输出
             frame_data = chunk if isinstance(chunk, bytes) else bytes(chunk)
             callback(frame_data)
 
@@ -474,6 +475,12 @@ def check_asr_update(before_config, new_config):
     update_asr = False
     current_asr_module = before_config["selected_module"]["ASR"]
     new_asr_module = new_config["selected_module"]["ASR"]
+
+    # 如果模块名称不同，就需要更新
+    if current_asr_module != new_asr_module:
+        return True
+
+    # 如果模块名称相同，再比较类型
     current_asr_type = (
         current_asr_module
         if "type" not in before_config["ASR"][current_asr_module]

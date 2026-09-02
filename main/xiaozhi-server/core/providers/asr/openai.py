@@ -21,7 +21,10 @@ class ASRProvider(ASRProviderBase):
 
         os.makedirs(self.output_dir, exist_ok=True)
 
-    async def speech_to_text(self, opus_data: List[bytes], session_id: str, audio_format="opus") -> Tuple[Optional[str], Optional[str]]:
+    def requires_file(self) -> bool:
+        return True
+
+    async def speech_to_text(self, opus_data: List[bytes], session_id: str, artifacts=None) -> Tuple[Optional[str], Optional[str]]:
         file_path = None
         try:
             start_time = time.time()

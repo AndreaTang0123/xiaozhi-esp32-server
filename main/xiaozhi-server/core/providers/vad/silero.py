@@ -1,7 +1,7 @@
 import time
+import os
 import numpy as np
-import torch
-import opuslib_next
+import onnxruntime
 from config.logger import setup_logging
 from core.providers.vad.base import VADProviderBase
 
@@ -12,11 +12,15 @@ logger = setup_logging()
 class VADProvider(VADProviderBase):
     def __init__(self, config):
         logger.bind(tag=TAG).info("SileroVAD", config)
-        self.model, _ = torch.hub.load(
-            repo_or_dir=config["model_dir"],
-            source="local",
-            model="silero_vad",
-            force_reload=False,
+
+        model_path = os.path.join(
+            config["model_dir"], "src", "silero_vad", "data", "silero_vad.onnx"
+        )
+        opts = onnxruntime.SessionOptions()
+        opts.inter_op_num_threads = 1
+        opts.intra_op_num_threads = 1
+        self.session = onnxruntime.InferenceSession(
+            model_path, providers=["CPUExecutionProvider"], sess_options=opts
         )
 
         self.decoder = opuslib_next.Decoder(16000, 1)
@@ -36,12 +40,12 @@ class VADProvider(VADProviderBase):
         # Minimum frames to count as voice
         self.frame_window_threshold = 3
 
-    def __del__(self):
-        if hasattr(self, 'decoder') and self.decoder is not None:
-            try:
-                del self.decoder
-            except Exception:
-                pass
+    def _init_connection_state(self, conn):
+        """为连接初始化独立的 VAD 状态"""
+        if not hasattr(conn, "_vad_state"):
+            conn._vad_state = np.zeros((2, 1, 128), dtype=np.float32)
+        if not hasattr(conn, "_vad_context"):
+            conn._vad_context = np.zeros((1, 64), dtype=np.float32)
 
     def is_vad(self, conn, opus_packet):
         # Manual mode: return True directly, no real-time VAD detection, buffer all audio
@@ -62,7 +66,9 @@ class VADProvider(VADProviderBase):
                 # Convert to tensor format required by model
                 audio_int16 = np.frombuffer(chunk, dtype=np.int16)
                 audio_float32 = audio_int16.astype(np.float32) / 32768.0
-                audio_tensor = torch.from_numpy(audio_float32)
+                audio_input = np.concatenate(
+                    [conn._vad_context, audio_float32.reshape(1, -1)], axis=1
+                ).astype(np.float32)
 
                 # Detect voice activity
                 with torch.no_grad():
@@ -87,12 +93,12 @@ class VADProvider(VADProviderBase):
 
                 # If previously voice present, but now silent, and time since last voice exceeds silence threshold, sentence is finished
                 if conn.client_have_voice and not client_have_voice:
-                    stop_duration = time.time() * 1000 - conn.last_activity_time
+                    stop_duration = time.time() * 1000 - conn.vad_last_voice_time
                     if stop_duration >= self.silence_threshold_ms:
                         conn.client_voice_stop = True
                 if client_have_voice:
                     conn.client_have_voice = True
-                    conn.last_activity_time = time.time() * 1000
+                    conn.vad_last_voice_time = time.time() * 1000
 
             return client_have_voice
         except opuslib_next.OpusError as e:

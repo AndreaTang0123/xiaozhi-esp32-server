@@ -28,17 +28,16 @@ nav {
 }
 
 .copyright {
-  text-align: center;
+  padding: 0 !important;
   color: rgb(0, 0, 0);
   font-size: 12px;
   font-weight: 400;
   margin-top: auto;
-  padding: 30px 0 20px;
-  position: absolute;
-  bottom: 0;
-  left: 50%;
-  transform: translateX(-50%);
   width: 100%;
+  height: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
 }
 
 .el-message {
@@ -59,6 +58,11 @@ export default {
       showCacheViewer: false,
       isCDNEnabled: process.env.VUE_APP_USE_CDN === 'true'
     };
+  },
+  created() {
+    // 挂载 store 状态
+    this.$store.commit('setUserInfo', JSON.parse(localStorage.getItem('userInfo') || '{}'));
+    this.$store.commit('setPubConfig', JSON.parse(localStorage.getItem('pubConfig') || '{}'));
   },
   mounted() {
     // Check if mobile device and VUE_APP_H5_URL is set, if both met redirect to H5 page

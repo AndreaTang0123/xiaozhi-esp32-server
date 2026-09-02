@@ -5,6 +5,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import cn.hutool.core.collection.CollUtil;
+import cn.hutool.core.collection.ListUtil;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -12,7 +15,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.baomidou.mybatisplus.spring.repository.CrudRepository;
 
 import xiaozhi.common.constant.Constant;
 import xiaozhi.common.page.PageData;
@@ -24,6 +27,7 @@ import xiaozhi.modules.agent.dto.AgentChatHistoryDTO;
 import xiaozhi.modules.agent.dto.AgentChatSessionDTO;
 import xiaozhi.modules.agent.entity.AgentChatHistoryEntity;
 import xiaozhi.modules.agent.service.AgentChatHistoryService;
+import xiaozhi.modules.agent.service.AgentChatTitleService;
 import xiaozhi.modules.agent.vo.AgentChatHistoryUserVO;
 
 /**
@@ -34,8 +38,11 @@ import xiaozhi.modules.agent.vo.AgentChatHistoryUserVO;
  * @since 1.0.0
  */
 @Service
-public class AgentChatHistoryServiceImpl extends ServiceImpl<AiAgentChatHistoryDao, AgentChatHistoryEntity>
+@RequiredArgsConstructor
+public class AgentChatHistoryServiceImpl extends CrudRepository<AiAgentChatHistoryDao, AgentChatHistoryEntity>
         implements AgentChatHistoryService {
+
+    private final AgentChatTitleService agentChatTitleService;
 
     @Override
     public PageData<AgentChatSessionDTO> getSessionListByAgentId(Map<String, Object> params) {
@@ -59,6 +66,7 @@ public class AgentChatHistoryServiceImpl extends ServiceImpl<AiAgentChatHistoryD
             dto.setSessionId((String) map.get("session_id"));
             dto.setCreatedAt((LocalDateTime) map.get("created_at"));
             dto.setChatCount(((Number) map.get("chat_count")).intValue());
+            dto.setTitle(agentChatTitleService.getTitleBySessionId(dto.getSessionId()));
             return dto;
         }).collect(Collectors.toList());
 
@@ -81,18 +89,30 @@ public class AgentChatHistoryServiceImpl extends ServiceImpl<AiAgentChatHistoryD
     }
 
     @Override
+    public String getAgentIdBySessionId(String sessionId) {
+        if (sessionId == null || sessionId.isBlank()) {
+            return null;
+        }
+        AgentChatHistoryEntity entity = baseMapper.selectOne(
+                new LambdaQueryWrapper<AgentChatHistoryEntity>()
+                        .select(AgentChatHistoryEntity::getAgentId)
+                        .eq(AgentChatHistoryEntity::getSessionId, sessionId)
+                        .last("LIMIT 1"));
+        return entity == null ? null : entity.getAgentId();
+    }
+
+    @Override
     @Transactional(rollbackFor = Exception.class)
     public void deleteByAgentId(String agentId, Boolean deleteAudio, Boolean deleteText) {
         if (deleteAudio) {
             // 分批删除音频,避免超时
             List<String> audioIds = baseMapper.getAudioIdsByAgentId(agentId);
-            if (audioIds != null && !audioIds.isEmpty()) {
-                int batchSize = 1000; // 每批删除1000条
-                for (int i = 0; i < audioIds.size(); i += batchSize) {
-                    int end = Math.min(i + batchSize, audioIds.size());
-                    List<String> batch = audioIds.subList(i, end);
-                    baseMapper.deleteAudioByIds(batch);
-                }
+            if (CollUtil.isNotEmpty(audioIds)) {
+                // 每批删除1000条
+                List<List<String>> batch = ListUtil.split(audioIds, 1000);
+                batch.forEach(dataList -> {
+                    baseMapper.deleteAudioByIds(dataList);
+                });
             }
         }
         if (deleteAudio && !deleteText) {
@@ -147,7 +167,7 @@ public class AgentChatHistoryServiceImpl extends ServiceImpl<AiAgentChatHistoryD
 
         // 尝试解析为 JSON
         try {
-            Map<String, Object> jsonMap = JsonUtils.parseObject(content, Map.class);
+            Map<String, Object> jsonMap = JsonUtils.parseMap(content);
             if (jsonMap != null && jsonMap.containsKey("content")) {
                 Object contentObj = jsonMap.get("content");
                 return contentObj != null ? contentObj.toString() : content;
@@ -167,6 +187,19 @@ public class AgentChatHistoryServiceImpl extends ServiceImpl<AiAgentChatHistoryD
                         .select(AgentChatHistoryEntity::getContent)
                         .eq(AgentChatHistoryEntity::getAudioId, audioId));
         return agentChatHistoryEntity == null ? null : agentChatHistoryEntity.getContent();
+    }
+
+    @Override
+    public String getAgentIdByAudioId(String audioId) {
+        if (audioId == null || audioId.isBlank()) {
+            return null;
+        }
+        AgentChatHistoryEntity entity = baseMapper.selectOne(
+                new LambdaQueryWrapper<AgentChatHistoryEntity>()
+                        .select(AgentChatHistoryEntity::getAgentId)
+                        .eq(AgentChatHistoryEntity::getAudioId, audioId)
+                        .last("LIMIT 1"));
+        return entity == null ? null : entity.getAgentId();
     }
 
     @Override

@@ -118,4 +118,3 @@ def initialize_voiceprint(asr_instance, config):
     except Exception as e:
         logger.bind(tag=TAG).error(f"Voiceprint initialization failed: {str(e)}")
         return False
-

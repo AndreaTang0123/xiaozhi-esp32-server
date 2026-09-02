@@ -6,18 +6,20 @@ from datetime import datetime
 
 class Message:
     def __init__(
-        self,
-        role: str,
-        content: str = None,
-        uniq_id: str = None,
-        tool_calls=None,
-        tool_call_id=None,
+            self,
+            role: str,
+            content: str = None,
+            uniq_id: str = None,
+            tool_calls=None,
+            tool_call_id=None,
+            is_temporary=False,
     ):
         self.uniq_id = uniq_id if uniq_id is not None else str(uuid.uuid4())
         self.role = role
         self.content = content
         self.tool_calls = tool_calls
         self.tool_call_id = tool_call_id
+        self.is_temporary = is_temporary  # 标记临时消息（如工具调用提醒）
 
 
 class Dialogue:
@@ -65,8 +67,39 @@ class Dialogue:
             # Insert at the beginning
             self.dialogue.insert(0, Message(role="system", content=new_content))
 
+    def _ensure_tool_calls_complete(self, messages: List[Message]) -> List[Message]:
+        """
+        确保所有 tool_calls 都有对应的 tool 响应
+        修复被打断导致的悬空 tool_calls，防止大模型 API 报 400 错误
+        """
+        pending_tool_calls = set()
+        result = []
+
+        for msg in messages:
+            result.append(msg)
+
+            if msg.role == "assistant" and msg.tool_calls:
+                for tc in msg.tool_calls:
+                    tc_id = tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None)
+                    if tc_id:
+                        pending_tool_calls.add(tc_id)
+
+            elif msg.role == "tool" and msg.tool_call_id:
+                pending_tool_calls.discard(msg.tool_call_id)
+
+        for missing_id in pending_tool_calls:
+            dummy_tool_msg = Message(
+                role="tool",
+                content='{"status": "interrupted", "message": "动作已取消/被打断"}',
+                tool_call_id=missing_id
+            )
+            result.append(dummy_tool_msg)
+
+        return result
+
     def get_llm_dialogue_with_memory(
-        self, memory_str: str = None, voiceprint_config: dict = None
+            self, memory_str: str = None, voiceprint_config: dict = None,
+            current_speaker: str = None,
     ) -> List[Dict[str, str]]:
         # Build dialogue
         dialogue = []
@@ -86,9 +119,13 @@ class Dialogue:
 
             # Add speaker personalized description
             try:
-                speakers = voiceprint_config.get("speakers", [])
-                if speakers:
-                    enhanced_system_prompt += "\n\n<speakers_info>"
+                current_speaker_name = (current_speaker or "").strip()
+                # 仅在本轮注入了有效身份时才输出 speakers_info，避免列表里的名字每轮
+                # 重复出现诱导模型反复称呼；后续轮不再注入身份，靠对话历史首轮保留
+                if current_speaker_name and current_speaker_name != "未知说话人":
+                    speakers = voiceprint_config.get("speakers", [])
+                    speakers_info = "\n<speakers_info>"
+                    speakers_info += f"\n当前说话人：{current_speaker_name}"
                     for speaker_str in speakers:
                         try:
                             parts = speaker_str.split(",", 2)
@@ -98,10 +135,11 @@ class Dialogue:
                                 description = (
                                     parts[2].strip() if len(parts) >= 3 else ""
                                 )
-                                enhanced_system_prompt += f"\n- {name}：{description}"
+                                speakers_info += f"\n- {name}：{description}"
                         except:
                             pass
-                    enhanced_system_prompt += "\n\n</speakers_info>"
+                    speakers_info += "\n</speakers_info>"
+                    full_prompt += speakers_info
             except:
                 # Ignore error if config read fails, does not affect other functions
                 pass

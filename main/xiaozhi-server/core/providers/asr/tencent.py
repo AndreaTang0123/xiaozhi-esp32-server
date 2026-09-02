@@ -32,7 +32,7 @@ class ASRProvider(ASRProviderBase):
         os.makedirs(self.output_dir, exist_ok=True)
 
     async def speech_to_text(
-        self, opus_data: List[bytes], session_id: str, audio_format="opus"
+        self, opus_data: List[bytes], session_id: str, artifacts=None
     ) -> Tuple[Optional[str], Optional[str]]:
     async def speech_to_text(
         self, opus_data: List[bytes], session_id: str, audio_format="opus"
@@ -42,7 +42,6 @@ class ASRProvider(ASRProviderBase):
             logger.bind(tag=TAG).warning("Audio data is empty!")
             return None, None
 
-        file_path = None
         try:
             # Check if configuration is set
             if not self.secret_id or not self.secret_key:
@@ -80,7 +79,7 @@ class ASRProvider(ASRProviderBase):
                     f"Tencent Cloud speech recognition time: {time.time() - start_time:.3f}s | Result: {result}"
                 )
 
-            return result, file_path
+            return result, artifacts.file_path
 
         except Exception as e:
             logger.bind(tag=TAG).error(f"Error occurred while processing audio! {e}", exc_info=True)

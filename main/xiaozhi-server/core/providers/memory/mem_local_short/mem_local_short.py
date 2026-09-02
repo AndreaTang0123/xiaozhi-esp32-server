@@ -149,10 +149,22 @@ class MemoryProvider(MemoryProviderBase):
 
         msgStr = ""
         for msg in msgs:
+            content = msg.content
+
+            # Extract content from JSON format if present (for ASR with emotion/language tags)
+            try:
+                if content and content.strip().startswith("{") and content.strip().endswith("}"):
+                    data = json.loads(content)
+                    if "content" in data:
+                        content = data["content"]
+            except (json.JSONDecodeError, KeyError, TypeError):
+                # If parsing fails, use original content
+                pass
+
             if msg.role == "user":
-                msgStr += f"User: {msg.content}\n"
+                msgStr += f"User: {content}\n"
             elif msg.role == "assistant":
-                msgStr += f"Assistant: {msg.content}\n"
+                msgStr += f"Assistant: {content}\n"
         if self.short_memory and len(self.short_memory) > 0:
             msgStr += "History Memory:\n"
             msgStr += self.short_memory
@@ -162,19 +174,12 @@ class MemoryProvider(MemoryProviderBase):
         msgStr += f"Current Time: {time_str}"
 
         if self.save_to_file:
-            result = self.llm.response_no_stream(
-                short_term_memory_prompt,
-                msgStr,
-                max_tokens=2000,
-                temperature=0.2,
-            )
-            json_str = extract_json_data(result)
             try:
                 json.loads(json_str)  # Check if json format is correct
                 self.short_memory = json_str
                 self.save_memory_to_file()
             except Exception as e:
-                print("Error:", e)
+                logger.bind(tag=TAG).error(f"Error in saving memory: {e}")
         else:
             # When save_to_file is False, call chat record summary interface on Java side
             summary_id = session_id if session_id else self.role_id

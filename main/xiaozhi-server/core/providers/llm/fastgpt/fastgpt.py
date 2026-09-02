@@ -43,20 +43,20 @@ class LLMProvider(LLMProviderBase):
                                 if line[6:].decode("utf-8") == "[DONE]":
                                     break
 
-                                data = json.loads(line[6:])
-                                if "choices" in data and len(data["choices"]) > 0:
-                                    delta = data["choices"][0].get("delta", {})
-                                    if (
-                                        delta
-                                        and "content" in delta
-                                        and delta["content"] is not None
-                                    ):
-                                        content = delta["content"]
-                                        if "<think>" in content:
-                                            continue
-                                        if "</think>" in content:
-                                            continue
-                                        yield content
+                            data = json.loads(line[6:])
+                            if "choices" in data and len(data["choices"]) > 0:
+                                delta = data["choices"][0].get("delta", {})
+                                if (
+                                    delta
+                                    and "content" in delta
+                                    and delta["content"] is not None
+                                ):
+                                    content = delta["content"]
+                                    if "<think>" in content:
+                                        continue
+                                    if "</think>" in content:
+                                        continue
+                                    yield content
 
                         except json.JSONDecodeError as e:
                             continue

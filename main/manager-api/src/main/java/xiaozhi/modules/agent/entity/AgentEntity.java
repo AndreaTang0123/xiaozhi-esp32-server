@@ -1,5 +1,6 @@
 package xiaozhi.modules.agent.entity;
 
+import java.math.BigDecimal;
 import java.util.Date;
 
 import com.baomidou.mybatisplus.annotation.IdType;
@@ -36,6 +37,9 @@ public class AgentEntity {
     @Schema(description = "大语言模型标识")
     private String llmModelId;
 
+    @Schema(description = "小模型标识")
+    private String slmModelId;
+
     @Schema(description = "VLLM模型标识")
     private String vllmModelId;
 
@@ -44,6 +48,18 @@ public class AgentEntity {
 
     @Schema(description = "音色标识")
     private String ttsVoiceId;
+
+    @Schema(description = "音色语言")
+    private String ttsLanguage;
+
+    @Schema(description = "TTS音量")
+    private Integer ttsVolume;
+
+    @Schema(description = "TTS语速")
+    private Integer ttsRate;
+
+    @Schema(description = "TTS音调")
+    private Integer ttsPitch;
 
     @Schema(description = "记忆模型标识")
     private String memModelId;
@@ -58,7 +74,7 @@ public class AgentEntity {
     private String systemPrompt;
 
     @Schema(description = "总结记忆", example = "构建可生长的动态记忆网络，在有限空间内保留关键信息的同时，智能维护信息演变轨迹\n" +
-            "根据对话记录，总结user的重要信息，以便在未来的对话中提供更个性化的服务", required = false)
+            "根据对话记录，总结user的重要信息，以便在未来的对话中提供更个性化的服务", requiredMode = Schema.RequiredMode.NOT_REQUIRED)
     private String summaryMemory;
 
     @Schema(description = "语言编码")

@@ -5,18 +5,25 @@ import uuid
 import json
 import time
 import queue
+import shutil
 import asyncio
+import tempfile
 import traceback
 import threading
 import opuslib_next
 from datetime import datetime
 from abc import ABC, abstractmethod
 from config.logger import setup_logging
-from typing import Optional, Tuple, List
+from core.providers.asr.dto.dto import InterfaceType
 from core.handle.receiveAudioHandle import startToChat
 from core.handle.reportHandle import enqueue_asr_report
 from core.utils.util import remove_punctuation_and_length, check_for_noise
 from core.handle.receiveAudioHandle import handleAudioMessage
+from typing import Optional, Tuple, List, NamedTuple, TYPE_CHECKING
+
+
+if TYPE_CHECKING:
+    from core.connection import ConnectionHandler
 
 TAG = __name__
 logger = setup_logging()
@@ -72,8 +79,8 @@ class ASRProviderBase(ABC):
             # Auto/Real-time mode: Use VAD detection
             have_voice = audio_have_voice
 
-            conn.asr_audio.append(audio)
-            if not have_voice and not conn.client_have_voice:
+            # 如果没有语音，且之前也没有声音，缓存部分音频
+            if not audio_have_voice and not conn.client_have_voice:
                 conn.asr_audio = conn.asr_audio[-10:]
                 return
 
@@ -204,10 +211,9 @@ class ASRProviderBase(ABC):
     def _build_enhanced_text(self, text: str, speaker_name: Optional[str]) -> str:
         """Build text containing speaker info (only for plain text ASR)"""
         if speaker_name and speaker_name.strip():
-            return json.dumps({
-                "speaker": speaker_name,
-                "content": text
-            }, ensure_ascii=False)
+            return json.dumps(
+                {"speaker": speaker_name, "content": text}, ensure_ascii=False
+            )
         else:
             return text
 
@@ -229,10 +235,10 @@ class ASRProviderBase(ABC):
                 wav_file.setsampwidth(2)      # 16-bit
                 wav_file.setframerate(16000)  # 16kHz sample rate
                 wav_file.writeframes(pcm_data)
-            
+
             wav_buffer.seek(0)
             wav_data = wav_buffer.read()
-            
+
             return wav_data
         except Exception as e:
             logger.bind(tag=TAG).error(f"WAV conversion failed: {e}")

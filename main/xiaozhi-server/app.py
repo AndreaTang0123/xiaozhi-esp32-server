@@ -48,7 +48,7 @@ async def monitor_stdin():
 
 async def main():
     check_ffmpeg_installed()
-    config = load_config()
+    config = await load_config()
 
     # auth_key priority: config file server.auth_key > manager-api.secret > automatically generated
     # auth_key is used for jwt authentication, such as jwt authentication for vision analysis interface, ota interface token generation and websocket authentication

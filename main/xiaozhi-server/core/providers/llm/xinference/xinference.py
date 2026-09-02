@@ -64,22 +64,22 @@ class LLMProvider(LLMProviderBase):
             yield "【Xinference Service Response Exception】"
 
     def response_with_functions(self, session_id, dialogue, functions=None):
-        try:
+        logger.bind(tag=TAG).debug(
+            f"Sending function call request to Xinference with model: {self.model_name}, dialogue length: {len(dialogue)}"
+        )
+        if functions:
             logger.bind(tag=TAG).debug(
-                f"Sending function call request to Xinference with model: {self.model_name}, dialogue length: {len(dialogue)}"
-            )
-            if functions:
-                logger.bind(tag=TAG).debug(
-                    f"Function calls enabled with: {[f.get('function', {}).get('name') for f in functions]}"
-                )
-
-            stream = self.client.chat.completions.create(
-                model=self.model_name,
-                messages=dialogue,
-                stream=True,
-                tools=functions,
+                f"Function calls enabled with: {[f.get('function', {}).get('name') for f in functions]}"
             )
 
+        stream = self.client.chat.completions.create(
+            model=self.model_name,
+            messages=dialogue,
+            stream=True,
+            tools=functions,
+        )
+
+        try:
             for chunk in stream:
                 delta = chunk.choices[0].delta
                 content = delta.content

@@ -7,12 +7,15 @@ import hashlib
 import asyncio
 import requests
 import websockets
-import opuslib_next
 from urllib import parse
 from datetime import datetime
 from config.logger import setup_logging
 from core.providers.asr.base import ASRProviderBase
 from core.providers.asr.dto.dto import InterfaceType
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from core.connection import ConnectionHandler
 
 TAG = __name__
 logger = setup_logging()
@@ -70,7 +73,6 @@ class ASRProvider(ASRProviderBase):
         self.interface_type = InterfaceType.STREAM
         self.config = config
         self.text = ""
-        self.decoder = opuslib_next.Decoder(16000, 1)
         self.asr_ws = None
         self.forward_task = None
         self.is_processing = False
@@ -125,17 +127,9 @@ class ASRProvider(ASRProviderBase):
     async def open_audio_channels(self, conn):
         await super().open_audio_channels(conn)
 
-    async def receive_audio(self, conn, audio, audio_have_voice):
-        # 初始化音频缓存
-        if not hasattr(conn, 'asr_audio_for_voiceprint'):
-            conn.asr_audio_for_voiceprint = []
-        
-        # 存储音频数据
-        if audio:
-            conn.asr_audio_for_voiceprint.append(audio)
-        
-        conn.asr_audio.append(audio)
-        conn.asr_audio = conn.asr_audio[-10:]
+    async def receive_audio(self, conn, pcm_frame, audio_have_voice):
+        # 先调用父类方法处理基础逻辑
+        await super().receive_audio(conn, pcm_frame, audio_have_voice)
 
         # Establish connection only if there is voice and no connection exists (excluding stopping cases)
         if audio_have_voice and not self.is_processing and not self.asr_ws:
@@ -148,7 +142,6 @@ class ASRProvider(ASRProviderBase):
 
         if self.asr_ws and self.is_processing and self.server_ready:
             try:
-                pcm_frame = self.decoder.decode(audio, 960)
                 await self.asr_ws.send(pcm_frame)
             except Exception as e:
                 logger.bind(tag=TAG).warning(f"Failed to send audio: {str(e)}")
@@ -204,8 +197,10 @@ class ASRProvider(ASRProviderBase):
         """Forward recognition results"""
         try:
             while not conn.stop_event.is_set():
+                # 获取当前连接的音频数据
+                audio_data = conn.asr_audio
                 try:
-                    response = await asyncio.wait_for(self.asr_ws.recv(), timeout=1.0)
+                    response = await self.asr_ws.recv()
                     result = json.loads(response)
 
                     header = result.get("header", {})
@@ -234,10 +229,9 @@ class ASRProvider(ASRProviderBase):
 
                         # Send cached audio
                         if conn.asr_audio:
-                            for cached_audio in conn.asr_audio[-10:]:
+                            for cached_pcm in conn.asr_audio[-10:]:
                                 try:
-                                    pcm_frame = self.decoder.decode(cached_audio, 960)
-                                    await self.asr_ws.send(pcm_frame)
+                                    await self.asr_ws.send(cached_pcm)
                                 except Exception as e:
                                     logger.bind(tag=TAG).warning(f"Failed to send cached audio: {e}")
                                     break
@@ -268,8 +262,6 @@ class ASRProvider(ASRProviderBase):
                             else:
                                 # Overwrite directly in auto mode
                                 self.text = text
-                                conn.reset_vad_states()
-                                audio_data = getattr(conn, 'asr_audio_for_voiceprint', [])
                                 await self.handle_voice_stop(conn, audio_data)
                                 break
 
@@ -289,11 +281,7 @@ class ASRProvider(ASRProviderBase):
         finally:
             # Clear connected audio cache
             await self._cleanup()
-            if conn:
-                if hasattr(conn, 'asr_audio_for_voiceprint'):
-                    conn.asr_audio_for_voiceprint = []
-                if hasattr(conn, 'asr_audio'):
-                    conn.asr_audio = []
+            conn.reset_audio_states()
 
     async def _send_stop_request(self):
         """Send stop recognition request (without closing connection)"""

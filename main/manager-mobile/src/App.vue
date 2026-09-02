@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { onHide, onLaunch, onShow } from '@dcloudio/uni-app'
-import { watch, onMounted } from 'vue'
+import { onMounted, watch } from 'vue'
 import { usePageAuth } from '@/hooks/usePageAuth'
-import { useConfigStore } from '@/store'
 import { t } from '@/i18n'
+import { useConfigStore } from '@/store'
 import { useLangStore } from '@/store/lang'
 import 'abortcontroller-polyfill/dist/abortcontroller-polyfill-only'
 

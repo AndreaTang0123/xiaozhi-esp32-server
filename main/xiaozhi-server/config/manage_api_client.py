@@ -183,6 +183,18 @@ async def get_agent_models(
     )
 
 
+async def get_correct_words(mac_address: str) -> Optional[Dict]:
+    """获取智能体替换词"""
+    try:
+        return await ManageApiClient._instance._execute_async_request(
+            "POST", "/config/correct-words",
+            json={"macAddress": mac_address}
+        )
+    except Exception as e:
+        print(f"获取替换词失败: {e}")
+        return None
+
+
 async def generate_and_save_chat_summary(session_id: str) -> Optional[Dict]:
     """Generate and save chat summary"""
     try:
@@ -192,6 +204,26 @@ async def generate_and_save_chat_summary(session_id: str) -> Optional[Dict]:
         )
     except Exception as e:
         print(f"Failed to generate and save chat summary: {e}")
+        return None
+
+
+async def generate_and_save_chat_title(session_id: str) -> Optional[Dict]:
+    """生成并保存聊天标题
+
+    注意：此函数在 _save_and_close 的守护线程中被调用。
+    服务关闭时主线程调用 safe_close() 将 _instance 置为 None，
+    与守护线程存在竞态条件，因此必须先判空，否则会触发：
+    'NoneType' object has no attribute '_execute_async_request'
+    """
+    if not ManageApiClient._instance:
+        return None
+    try:
+        return await ManageApiClient._instance._execute_async_request(
+            "POST",
+            f"/agent/chat-title/{session_id}/generate",
+        )
+    except Exception as e:
+        print(f"生成并保存聊天标题失败: {e}")
         return None
 
 
@@ -218,6 +250,20 @@ async def report(
         )
     except Exception as e:
         print(f"TTS report failed: {e}")
+        return None
+
+
+async def lookup_address_book(caller_mac: str, nickname: str) -> Optional[Dict]:
+    """根据昵称查找目标设备"""
+    if not ManageApiClient._instance:
+        return None
+    try:
+        return await ManageApiClient._instance._execute_async_request(
+            "GET",
+            f"/device/address-book/lookup?callerMac={caller_mac}&nickname={nickname}",
+        )
+    except Exception as e:
+        print(f"通讯录查找失败: {e}")
         return None
 
 

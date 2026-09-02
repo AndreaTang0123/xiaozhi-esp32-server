@@ -55,6 +55,14 @@ class AudioRateController:
         Args:
             message_callback: Message sending callback function async def()
         """
+        if len(self.queue) == 0 and self.play_position > 0:
+            elapsed_since_empty = (time.monotonic() - self._last_queue_empty_time) * 1000
+            if elapsed_since_empty >= self.frame_duration:
+                self.start_timestamp = time.monotonic() - (self.play_position / 1000)
+                self.logger.bind(tag=TAG).debug(
+                    f"队列从空恢复，重置时间戳，当前播放位置: {self.play_position}ms，间隔: {elapsed_since_empty:.0f}ms"
+                )
+
         self.queue.append(("message", message_callback))
         # Event handling
         self.queue_empty_event.clear()
@@ -127,6 +135,7 @@ class AudioRateController:
         # Clear events after processing queue
         self.queue_empty_event.set()
         self.queue_has_data_event.clear()
+        self._last_queue_empty_time = time.monotonic()  # 记录队列清空时间
 
     def start_sending(self, send_audio_callback):
         """

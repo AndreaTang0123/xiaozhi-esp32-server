@@ -101,7 +101,7 @@ class ASRProvider(ASRProviderBase):
         logger.bind(tag=TAG).debug(f"Sent end message: {end_message}")
 
     async def speech_to_text(
-        self, opus_data: List[bytes], session_id: str, audio_format="opus"
+        self, opus_data: List[bytes], session_id: str, artifacts=None
     ) -> Tuple[Optional[str], Optional[str]]:
         """
         Convert speech data to text using FunASR.
@@ -132,7 +132,7 @@ class ASRProvider(ASRProviderBase):
             try:
                 # Use asyncio to handle WebSocket communication
                 send_task = asyncio.create_task(
-                    self._send_data(ws, combined_pcm_data, session_id)
+                    self._send_data(ws, artifacts.pcm_bytes, session_id)
                 )
                 receive_task = asyncio.create_task(self._receive_responses(ws))
 
@@ -161,14 +161,14 @@ class ASRProvider(ASRProviderBase):
                 result = lang_tag_filter(result)
                 return (
                     result,
-                    file_path,
+                    artifacts.file_path,
                 )  # Return the recognized text and timestamp (if any)
 
             except websockets.exceptions.ConnectionClosed as e:
                 logger.bind(tag=TAG).error(f"WebSocket connection closed: {e}")
-                return "", file_path
+                return "", artifacts.file_path
             except Exception as e:
                 logger.bind(tag=TAG).error(
                     f"Error during speech-to-text conversion: {e}", exc_info=True
                 )
-                return "", file_path
+                return "", artifacts.file_path

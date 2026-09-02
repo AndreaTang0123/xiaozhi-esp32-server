@@ -4,7 +4,12 @@ Responsible for managing and updating system prompts, including quick initializa
 """
 
 import os
-from typing import Dict, Any
+import asyncio
+import threading
+from typing import Dict, Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from core.connection import ConnectionHandler
 from config.logger import setup_logging
 from config.config_loader import get_project_dir
 from jinja2 import Template
@@ -53,6 +58,7 @@ class PromptManager:
         
         # Initialize context source
         from core.utils.context_provider import ContextDataProvider
+
         self.context_provider = ContextDataProvider(config, self.logger)
         self.context_data = {}
 
@@ -257,7 +263,10 @@ class PromptManager:
             
             # Get configured context data
             if hasattr(conn, "device_id") and conn.device_id:
-                if self.base_prompt_template and "dynamic_context" in self.base_prompt_template:
+                if (
+                    self.base_prompt_template
+                    and "dynamic_context" in self.base_prompt_template
+                ):
                     self.context_data = self.context_provider.fetch_all(conn.device_id)
                 else:
                     self.context_data = ""
@@ -319,6 +328,7 @@ class PromptManager:
                 device_id=device_id,
                 client_ip=client_ip,
                 dynamic_context=self.context_data,
+                language=language,
                 *args,
                 **kwargs,
             )

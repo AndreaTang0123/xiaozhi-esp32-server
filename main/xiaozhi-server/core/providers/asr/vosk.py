@@ -44,7 +44,7 @@ class ASRProvider(ASRProviderBase):
             raise
 
     async def speech_to_text(
-        self, audio_data: List[bytes], session_id: str, audio_format: str = "opus"
+        self, opus_data: List[bytes], session_id: str, artifacts=None
     ) -> Tuple[Optional[str], Optional[str]]:
         """Convert speech data to text"""
         file_path = None
@@ -81,8 +81,8 @@ class ASRProvider(ASRProviderBase):
             chunk_size = 2000
             text_result = ""
             
-            for i in range(0, len(combined_pcm_data), chunk_size):
-                chunk = combined_pcm_data[i:i+chunk_size]
+            for i in range(0, len(artifacts.pcm_bytes), chunk_size):
+                chunk = artifacts.pcm_bytes[i:i+chunk_size]
                 if self.recognizer.AcceptWaveform(chunk):
                     result = json.loads(self.recognizer.Result())
                     text = result.get('text', '')
@@ -99,7 +99,7 @@ class ASRProvider(ASRProviderBase):
                 f"VOSK speech recognition time: {time.time() - start_time:.3f}s | Result: {text_result.strip()}"
             )
             
-            return text_result.strip(), file_path
+            return text_result.strip(), artifacts.file_path
             
         except Exception as e:
             logger.bind(tag=TAG).error(f"VOSK speech recognition failed: {e}")

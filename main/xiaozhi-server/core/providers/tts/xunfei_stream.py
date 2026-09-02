@@ -9,9 +9,10 @@ import hashlib
 import asyncio
 import traceback
 import websockets
+
 from asyncio import Task
+from typing import Callable, Any
 from config.logger import setup_logging
-from core.utils import opus_encoder_utils
 from core.utils.tts import MarkdownCleaner
 from urllib.parse import urlencode, urlparse
 from core.providers.tts.base import TTSProviderBase
@@ -59,6 +60,12 @@ class XunfeiWSAuth:
 
 
 class TTSProvider(TTSProviderBase):
+    TTS_PARAM_CONFIG = [
+        ("ttsVolume", "volume", 0, 100, 50, int),
+        ("ttsRate", "speed", 0, 100, 50, int),
+        ("ttsPitch", "pitch", 0, 100, 50, int),
+    ]
+
     def __init__(self, config, delete_audio_file):
         super().__init__(config, delete_audio_file)
 
@@ -69,6 +76,7 @@ class TTSProvider(TTSProviderBase):
         self.app_id = config.get("app_id")
         self.api_key = config.get("api_key")
         self.api_secret = config.get("api_secret")
+        self.report_on_last = True
 
         # Interface address
         self.api_url = config.get("api_url", "wss://cbm01.cn-huabei-1.xf-yun.com/v1/private/mcd9m97e6")
@@ -109,6 +117,7 @@ class TTSProvider(TTSProviderBase):
         # WebSocket config
         self.ws = None
         self._monitor_task = None
+        self.activate_session = False
 
         # Sequence number management
         self.text_seq = 0
@@ -164,6 +173,22 @@ class TTSProvider(TTSProviderBase):
                     logger.bind(tag=TAG).info("Received interrupt info, terminating TTS text processing thread")
                     continue
 
+                # 过滤旧消息：检查sentence_id是否匹配
+                if message.sentence_id != self.conn.sentence_id:
+                    continue
+
+                logger.bind(tag=TAG).debug(
+                    f"收到TTS任务｜{message.sentence_type.name} ｜ {message.content_type.name} | 会话ID: {message.sentence_id}"
+                )
+
+                if message.sentence_type == SentenceType.FIRST:
+                    # 重置流式处理状态
+                    self.reset_stream_state()
+                    # 重置序列号
+                    self.text_seq = 0
+                # 增加序列号
+                self.text_seq += 1
+
                 if message.sentence_type == SentenceType.FIRST:
                     # Initialize parameters
                     try:
@@ -176,7 +201,7 @@ class TTSProvider(TTSProviderBase):
                             self.start_session(self.conn.sentence_id),
                             loop=self.conn.loop,
                         )
-                        future.result()
+                        future.result(timeout=self.tts_timeout)
                         self.before_stop_play_files.clear()
                         logger.bind(tag=TAG).info("TTS session started successfully")
 
@@ -237,6 +262,7 @@ class TTSProvider(TTSProviderBase):
                 return
 
             filtered_text = MarkdownCleaner.clean_markdown(text)
+
             if filtered_text:
                 # Send text synthesis request
                 run_request = self._build_base_request(status=1,text=filtered_text)
@@ -358,14 +384,15 @@ class TTSProvider(TTSProviderBase):
                                     self._process_before_stop_play_files()
                                     break
                                 else:
-                                    if self.conn.tts_MessageText:
+                                    tts_text = self.get_tts_text(self.conn.sentence_id)
+                                    if tts_text:
                                         logger.bind(tag=TAG).info(
                                             f"Sentence voice generation successful: {self.conn.tts_MessageText}"
                                         )
                                         self.tts_audio_queue.put(
-                                            (SentenceType.FIRST, [], self.conn.tts_MessageText)
+                                            (SentenceType.FIRST, [], tts_text)
                                         )
-                                        self.conn.tts_MessageText = None
+                                        self.clear_tts_text(self.conn.sentence_id)
                                     try:
                                         audio_bytes = base64.b64decode(audio_data)
                                         self.opus_encoder.encode_pcm_to_opus_stream(
@@ -402,6 +429,7 @@ class TTSProvider(TTSProviderBase):
                 self.ws = None
         # Clean up reference when monitoring task exits
         finally:
+            self.activate_session = False
             self._monitor_task = None
 
     def to_tts(self, text: str) -> list:
@@ -430,6 +458,8 @@ class TTSProvider(TTSProviderBase):
 
                 try:
                     filtered_text = MarkdownCleaner.clean_markdown(text)
+                    if self._correct_words_pattern:
+                        filtered_text = self._correct_words_pattern.sub(lambda m: self.correct_words[m.group(0)], filtered_text)
 
                     text_request = self._build_base_request(status=2,text=filtered_text)
 
@@ -507,7 +537,7 @@ class TTSProvider(TTSProviderBase):
                     "rhy": 0,
                     "audio": {
                         "encoding": self.format,
-                        "sample_rate": self.sample_rate,
+                        "sample_rate": self.conn.sample_rate,
                         "channels": 1,
                         "bit_depth": 16,
                         "frame_size": 0

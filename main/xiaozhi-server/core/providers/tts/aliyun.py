@@ -1,15 +1,17 @@
 import uuid
 import json
 import hmac
+import time
 import hashlib
 import base64
 import requests
-from datetime import datetime
-from core.providers.tts.base import TTSProviderBase
-from config.logger import setup_logging
-import time
-import uuid
+
 from urllib import parse
+from datetime import datetime
+from config.logger import setup_logging
+from core.providers.tts.base import TTSProviderBase
+from core.utils.tts import convert_percentage_to_range
+
 
 TAG = __name__
 logger = setup_logging()
@@ -29,7 +31,7 @@ class AccessToken:
         return encoded_text.replace("+", "%20").replace("*", "%2A").replace("%7E", "~")
 
     @staticmethod
-    def create_token(access_key_id, access_key_secret):
+    def create_token(access_key_id, access_key_secret, timeout):
         parameters = {
             "AccessKeyId": access_key_id,
             "Action": "CreateToken",
@@ -84,6 +86,11 @@ class AccessToken:
 
 
 class TTSProvider(TTSProviderBase):
+    TTS_PARAM_CONFIG = [
+        ("ttsVolume", "volume", 0, 100, 50, int),
+        ("ttsRate", "speech_rate", -500, 500, 0, int),
+        ("ttsPitch", "pitch_rate", -500, 500, 0, int),
+    ]
 
     def __init__(self, config, delete_audio_file):
         super().__init__(config, delete_audio_file)
@@ -93,10 +100,7 @@ class TTSProvider(TTSProviderBase):
         self.access_key_secret = config.get("access_key_secret")
 
         self.appkey = config.get("appkey")
-        self.format = config.get("format", "wav")
         self.audio_file_type = config.get("format", "wav")
-        sample_rate = config.get("sample_rate", "16000")
-        self.sample_rate = int(sample_rate) if sample_rate else 16000
 
         if config.get("private_voice"):
             self.voice = config.get("private_voice")
@@ -111,6 +115,9 @@ class TTSProvider(TTSProviderBase):
 
         pitch_rate = config.get("pitch_rate", "0")
         self.pitch_rate = int(pitch_rate) if pitch_rate else 0
+
+        # 应用百分比调整（如果存在），否则使用公有化配置
+        self._apply_percentage_params(config)
 
         self.host = config.get("host", "nls-gateway-cn-shanghai.aliyuncs.com")
         self.api_url = f"https://{self.host}/stream/v1/tts"
@@ -128,7 +135,7 @@ class TTSProvider(TTSProviderBase):
         """Refresh Token and record expiration time"""
         if self.access_key_id and self.access_key_secret:
             self.token, expire_time_str = AccessToken.create_token(
-                self.access_key_id, self.access_key_secret
+                self.access_key_id, self.access_key_secret, self.tts_timeout
             )
             if not expire_time_str:
                 raise ValueError("Cannot get valid Token expiration time")
@@ -171,8 +178,8 @@ class TTSProvider(TTSProviderBase):
             "appkey": self.appkey,
             "token": self.token,
             "text": text,
-            "format": self.format,
-            "sample_rate": self.sample_rate,
+            "format": self.audio_file_type,
+            "sample_rate": self.conn.sample_rate,
             "voice": self.voice,
             "volume": self.volume,
             "speech_rate": self.speech_rate,
@@ -182,12 +189,18 @@ class TTSProvider(TTSProviderBase):
         # print(self.api_url, json.dumps(request_json, ensure_ascii=False))
         try:
             resp = requests.post(
-                self.api_url, json.dumps(request_json), headers=self.header
+                self.api_url,
+                json.dumps(request_json),
+                headers=self.header,
+                timeout=self.tts_timeout,
             )
             if resp.status_code == 401:  # Special handling for Token expiration
                 self._refresh_token()
                 resp = requests.post(
-                    self.api_url, json.dumps(request_json), headers=self.header
+                    self.api_url,
+                    json.dumps(request_json),
+                    headers=self.header,
+                    timeout=self.tts_timeout,
                 )
             # Check if response mime type is audio/***, if so save; response is binary
             if resp.headers["Content-Type"].startswith("audio/"):

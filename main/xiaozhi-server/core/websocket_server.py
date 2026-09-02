@@ -42,7 +42,7 @@ TAG = __name__
 class WebSocketServer:
     def __init__(self, config: dict):
         self.config = config
-        self.logger = setup_logging()
+        self.logger = setup_logging(config)
         self.config_lock = asyncio.Lock()
         modules = initialize_modules(
             self.logger,
@@ -98,7 +98,7 @@ class WebSocketServer:
         ):
             await asyncio.Future()
 
-    async def _handle_connection(self, websocket):
+    async def _handle_connection(self, websocket: websockets.ServerConnection):
         headers = dict(websocket.request.headers)
         if headers.get("device-id", None) is None:
             # Try to get device-id from URL query parameters

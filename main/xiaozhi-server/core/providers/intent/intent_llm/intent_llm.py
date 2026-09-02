@@ -1,11 +1,18 @@
-from typing import List, Dict
+import asyncio
+from typing import List, Dict, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from core.connection import ConnectionHandler
 from ..base import IntentProviderBase
 from plugins_func.functions.play_music import initialize_music_handler
 from config.logger import setup_logging
+from core.utils.util import get_system_error_response
 import re
 import json
 import hashlib
 import time
+
+
 
 TAG = __name__
 logger = setup_logging()
@@ -87,7 +94,9 @@ class IntentProvider(IntentProviderBase):
         )
         return llm_result
 
-    async def detect_intent(self, conn, dialogue_history: List[Dict], text: str) -> str:
+    async def detect_intent(
+        self, conn: "ConnectionHandler", dialogue_history: List[Dict], text: str
+    ) -> str:
         if not self.llm:
             raise ValueError("LLM provider not set")
         if conn.func_handler is None:

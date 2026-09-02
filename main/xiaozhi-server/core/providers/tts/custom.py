@@ -15,7 +15,6 @@ class TTSProvider(TTSProviderBase):
         self.url = config.get("url")
         self.method = config.get("method", "GET")
         self.headers = config.get("headers", {})
-        self.format = config.get("format", "wav")
         self.audio_file_type = config.get("format", "wav")
         self.output_file = config.get("output_dir", "tmp/")
         self.params = config.get("params")
@@ -29,7 +28,7 @@ class TTSProvider(TTSProviderBase):
             raise TypeError("Custom TTS配置参数出错, 请参考配置说明")
 
     def generate_filename(self):
-        return os.path.join(self.output_file, f"tts-{datetime.now().date()}@{uuid.uuid4().hex}.{self.format}")
+        return os.path.join(self.output_file, f"tts-{datetime.now().date()}@{uuid.uuid4().hex}.{self.audio_file_type}")
 
     async def text_to_speak(self, text, output_file):
         request_params = {}
@@ -39,9 +38,19 @@ class TTSProvider(TTSProviderBase):
             request_params[k] = v
 
         if self.method.upper() == "POST":
-            resp = requests.post(self.url, json=request_params, headers=self.headers)
+            resp = requests.post(
+                self.url,
+                json=request_params,
+                headers=self.headers,
+                timeout=self.tts_timeout,
+            )
         else:
-            resp = requests.get(self.url, params=request_params, headers=self.headers)
+            resp = requests.get(
+                self.url,
+                params=request_params,
+                headers=self.headers,
+                timeout=self.tts_timeout,
+            )
         if resp.status_code == 200:
             if output_file:
                 with open(output_file, "wb") as file:

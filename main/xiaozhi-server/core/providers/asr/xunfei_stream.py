@@ -4,12 +4,14 @@ import base64
 import hashlib
 import asyncio
 import websockets
-import opuslib_next
 import gc
 from time import mktime
 from datetime import datetime
 from urllib.parse import urlencode
-from typing import List
+from typing import List, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from core.connection import ConnectionHandler
 from config.logger import setup_logging
 from wsgiref.handlers import format_date_time
 from core.providers.asr.base import ASRProviderBase
@@ -30,7 +32,6 @@ class ASRProvider(ASRProviderBase):
         self.interface_type = InterfaceType.STREAM
         self.config = config
         self.text = ""
-        self.decoder = opuslib_next.Decoder(16000, 1)
         self.asr_ws = None
         self.forward_task = None
         self.is_processing = False
@@ -104,7 +105,7 @@ class ASRProvider(ASRProviderBase):
         url = url + "?" + urlencode(v)
         return url
 
-    async def open_audio_channels(self, conn):
+    async def open_audio_channels(self, conn: "ConnectionHandler"):
         await super().open_audio_channels(conn)
 
     async def receive_audio(self, conn, audio, audio_have_voice):
@@ -130,7 +131,6 @@ class ASRProvider(ASRProviderBase):
         # Send current audio data
         if self.asr_ws and self.is_processing and self.server_ready:
             try:
-                pcm_frame = self.decoder.decode(audio, 960)
                 await self._send_audio_frame(pcm_frame, STATUS_CONTINUE_FRAME)
             except Exception as e:
                 logger.bind(tag=TAG).warning(f"Error sending audio data: {e}")
@@ -162,19 +162,15 @@ class ASRProvider(ASRProviderBase):
 
             # Send first audio frame
             if conn.asr_audio and len(conn.asr_audio) > 0:
-                first_audio = conn.asr_audio[-1] if conn.asr_audio else b""
-                pcm_frame = (
-                    self.decoder.decode(first_audio, 960) if first_audio else b""
-                )
-                await self._send_audio_frame(pcm_frame, STATUS_FIRST_FRAME)
+                first_pcm = conn.asr_audio[-1] if conn.asr_audio else b""
+                await self._send_audio_frame(first_pcm, STATUS_FIRST_FRAME)
                 self.server_ready = True
                 logger.bind(tag=TAG).info("First frame sent, starting recognition")
 
                 # Send cached audio data
                 for cached_audio in conn.asr_audio[-10:]:
                     try:
-                        pcm_frame = self.decoder.decode(cached_audio, 960)
-                        await self._send_audio_frame(pcm_frame, STATUS_CONTINUE_FRAME)
+                        await self._send_audio_frame(cached_pcm, STATUS_CONTINUE_FRAME)
                     except Exception as e:
                         logger.bind(tag=TAG).info(f"Error sending cached audio data: {e}")
                         break
@@ -274,6 +270,7 @@ class ASRProvider(ASRProviderBase):
         finally:
             # Clean up connection resources
             await self._cleanup()
+            conn.reset_audio_states()
 
             # Clean up connected audio cache
             if conn:

@@ -235,11 +235,10 @@ class ASRProvider(ASRProviderBase):
             yield data[offset:data_len], True
 
     async def speech_to_text(
-        self, opus_data: List[bytes], session_id: str, audio_format="opus"
+        self, opus_data: List[bytes], session_id: str, artifacts=None
     ) -> Tuple[Optional[str], Optional[str]]:
         """Convert speech data to text"""
 
-        file_path = None
         try:
             # Merge all opus data packets
             if audio_format == "pcm":
@@ -261,13 +260,13 @@ class ASRProvider(ASRProviderBase):
 
             # Speech recognition
             start_time = time.time()
-            text = await self._send_request(combined_pcm_data, segment_size)
+            text = await self._send_request(artifacts.pcm_bytes, segment_size)
             if text:
                 logger.bind(tag=TAG).debug(
                     f"Speech recognition time: {time.time() - start_time:.3f}s | Result: {text}"
                 )
-                return text, file_path
-            return "", file_path
+                return text, artifacts.file_path
+            return "", artifacts.file_path
 
         except Exception as e:
             logger.bind(tag=TAG).error(f"Speech recognition failed: {e}", exc_info=True)

@@ -1,7 +1,11 @@
-import requests
-import sys
+import json
+import httpx
 from config.logger import setup_logging
 from plugins_func.register import register_function, ToolType, ActionResponse, Action
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from core.connection import ConnectionHandler
 
 TAG = __name__
 logger = setup_logging()
@@ -60,7 +64,6 @@ def search_from_ragflow(conn, question=None):
 
         # Get content first, then manually handle JSON decoding
         response_text = response.text
-        import json
 
         result = json.loads(response_text)
 
@@ -145,9 +148,23 @@ def search_from_ragflow(conn, question=None):
             else:
                 error_response = f"RAG interface HTTP exception: {str(e)}"
 
+    except httpx.HTTPStatusError as e:
+        if hasattr(e.response, "status_code"):
+            status_code = e.response.status_code
+            error_response = f"RAG接口HTTP错误（状态码：{status_code}）"
+            try:
+                error_detail = e.response.json().get("error", {}).get("message", "")
+                if error_detail:
+                    error_response += f"\n错误详情：{error_detail}"
+            except:
+                pass
         else:
             error_response = f"RAG interface network exception ({error_type}): {str(e)}"
 
+    except httpx.HTTPError as e:
+        error_response = "无法连接到RAG接口"
+        error_response += "\n可能原因：RAGflow服务地址错误或服务未运行"
+        error_response += "\n解决方案：请检查RAGflow服务地址配置和服务状态"
         return ActionResponse(Action.RESPONSE, None, error_response)
 
     except Exception as e:

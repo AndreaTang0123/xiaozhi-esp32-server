@@ -70,7 +70,7 @@ class ASRProvider(ASRProviderBase):
         """Main speech-to-text processing logic"""
         file_path = None
         retry_count = 0
-
+        
         while retry_count < MAX_RETRIES:
             try:
                 # Merge all Opus packets
@@ -97,9 +97,9 @@ class ASRProvider(ASRProviderBase):
                 start_time = time.time()
                 result = await asyncio.to_thread(
                     self.model.generate,
-                    input=combined_pcm_data,
+                    input=artifacts.pcm_bytes,
                     cache={},
-                    language="auto",
+                    language=self.language,
                     use_itn=True,
                     batch_size_s=60,
                 )
@@ -125,7 +125,7 @@ class ASRProvider(ASRProviderBase):
                     f"Speech recognition time: {time.time() - start_time:.3f}s | Result: {log_content}"
                 )
 
-                return text, file_path
+                return text, artifacts.file_path
 
             except OSError as e:
                 retry_count += 1
@@ -133,7 +133,7 @@ class ASRProvider(ASRProviderBase):
                     logger.bind(tag=TAG).error(
                         f"Speech recognition failed (retried {retry_count} times): {e}", exc_info=True
                     )
-                    return "", file_path
+                    return "", None
                 logger.bind(tag=TAG).warning(
                     f"Speech recognition failed, retrying ({retry_count}/{MAX_RETRIES}): {e}"
                 )

@@ -97,28 +97,28 @@ class LLMProvider(LLMProviderBase):
             "stream": True,
         }
 
-            # Prepare extra_body, starting with generic extra_body from config
-            final_extra_body = getattr(self, "extra_body_config", {}).copy()
-            
-            # Merge in self.options (which includes num_ctx)
-            if self.options:
-                if "options" not in final_extra_body:
-                    final_extra_body["options"] = {}
-                # self.options take precedence over generic config if distinct, 
-                # but usually self.options ARE from config, so update is fine.
-                final_extra_body["options"].update(self.options)
-            
-            if final_extra_body:
-                request_params["extra_body"] = final_extra_body
-            
-            # Add optional parameters, only add if parameter is not None
-            optional_params = {
-                "max_tokens": kwargs.get("max_tokens", self.max_tokens),
-                "temperature": kwargs.get("temperature", self.temperature),
-                "top_p": kwargs.get("top_p", self.top_p),
-                "frequency_penalty": kwargs.get("frequency_penalty", self.frequency_penalty),
-                "response_format": kwargs.get("response_format"),
-            }
+        # Prepare extra_body, starting with generic extra_body from config
+        final_extra_body = getattr(self, "extra_body_config", {}).copy()
+
+        # Merge in self.options (which includes num_ctx)
+        if self.options:
+            if "options" not in final_extra_body:
+                final_extra_body["options"] = {}
+            # self.options take precedence over generic config if distinct,
+            # but usually self.options ARE from config, so update is fine.
+            final_extra_body["options"].update(self.options)
+
+        if final_extra_body:
+            request_params["extra_body"] = final_extra_body
+
+        # Add optional parameters, only add if parameter is not None
+        optional_params = {
+            "max_tokens": kwargs.get("max_tokens", self.max_tokens),
+            "temperature": kwargs.get("temperature", self.temperature),
+            "top_p": kwargs.get("top_p", self.top_p),
+            "frequency_penalty": kwargs.get("frequency_penalty", self.frequency_penalty),
+            "response_format": kwargs.get("response_format"),
+        }
 
         for key, value in optional_params.items():
             if value is not None:

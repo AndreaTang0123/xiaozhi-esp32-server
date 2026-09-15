@@ -1,0 +1,6 @@
+#!/Users/andreatang/Downloads/Research/src/xiaozhi-esp32-server/main/xiaozhi-server/.venv311/bin/python
+import sys
+from funasr.bin.train import main_hydra
+if __name__ == '__main__':
+    sys.argv[0] = sys.argv[0].removesuffix('.exe')
+    sys.exit(main_hydra())

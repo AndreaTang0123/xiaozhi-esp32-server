@@ -2,6 +2,7 @@ import time
 import os
 import numpy as np
 import onnxruntime
+import opuslib_next
 from config.logger import setup_logging
 from core.providers.vad.base import VADProviderBase
 

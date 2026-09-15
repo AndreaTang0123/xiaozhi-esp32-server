@@ -45,7 +45,6 @@ from config.logger import setup_logging, build_module_string, create_connection_
 from config.manage_api_client import DeviceNotFoundException, DeviceBindException, generate_and_save_chat_title
 from core.utils.prompt_manager import PromptManager
 from core.utils.voiceprint_provider import VoiceprintProvider
-from core.utils.util import get_system_error_response
 from core.utils import textUtils
 from core.utils.news_rag import news_rag
 from core.utils.history_rag import history_rag

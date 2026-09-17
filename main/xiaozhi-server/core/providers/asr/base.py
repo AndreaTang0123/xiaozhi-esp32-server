@@ -247,6 +247,13 @@ class ASRProviderBase(ABC):
     def stop_ws_connection(self):
         pass
 
+    async def close(self):
+        """Resource cleanup method, called by ConnectionHandler on disconnect."""
+        try:
+            self.stop_ws_connection()
+        except Exception as e:
+            logger.bind(tag=TAG).warning(f"Error stopping ASR ws connection: {e}")
+
     def save_audio_to_file(self, pcm_data: List[bytes], session_id: str, client_id: str = None) -> str:
         """Save PCM data as WAV file"""
         if client_id:

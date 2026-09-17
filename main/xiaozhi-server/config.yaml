@@ -56,7 +56,7 @@ LLM:
     type: "openai"
     base_url: "http://localhost:11434/v1"
     api_key: "ollama"
-    model_name: "minimax-m2:cloud"
+    model_name: "qwen2.5:3b"
     timeout: 30
     num_ctx: 32768 # Increased for 16GB RAM: enables processing longer news timelines and history
     temperature: 0.5 # Controls randomness (0.0 to 2.0). Default is 1.0. Lower is more deterministic.

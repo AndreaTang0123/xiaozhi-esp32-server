@@ -56,6 +56,8 @@ def is_private_ip(ip_addr):
                 return True  # Loopback address
             elif ip_parts[0] == 169 and ip_parts[1] == 254:
                 return True  # Link-local address 169.254.0.0/16
+            elif ip_parts[0] == 100 and 64 <= ip_parts[1] <= 127:
+                return True  # Carrier-grade NAT 100.64.0.0/10 (used by Tailscale)
             else:
                 return False  # Not a private IPv4 address
         else:  # IPv6 address

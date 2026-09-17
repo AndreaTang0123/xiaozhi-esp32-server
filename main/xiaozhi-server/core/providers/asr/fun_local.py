@@ -51,6 +51,7 @@ class ASRProvider(ASRProviderBase):
         self.model_dir = config.get("model_dir")
         self.output_dir = config.get("output_dir")  # Correct config key name
         self.device = config.get("device", "cpu")
+        self.language = config.get("language", "auto")
         self.delete_audio_file = delete_audio_file
 
         # Ensure output directory exists
@@ -97,7 +98,7 @@ class ASRProvider(ASRProviderBase):
                 start_time = time.time()
                 result = await asyncio.to_thread(
                     self.model.generate,
-                    input=artifacts.pcm_bytes,
+                    input=combined_pcm_data,
                     cache={},
                     language=self.language,
                     use_itn=True,
@@ -125,7 +126,7 @@ class ASRProvider(ASRProviderBase):
                     f"Speech recognition time: {time.time() - start_time:.3f}s | Result: {log_content}"
                 )
 
-                return text, artifacts.file_path
+                return text, file_path
 
             except OSError as e:
                 retry_count += 1

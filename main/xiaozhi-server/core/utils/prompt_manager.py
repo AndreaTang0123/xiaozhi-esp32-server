@@ -156,6 +156,38 @@ class PromptManager:
         self.logger.bind(tag=TAG).info(f"Using default prompt: {user_prompt[:50]}...")
         return user_prompt
 
+    def get_pipeline_prompts(self, client_id: str = None, device_id: str = None) -> Dict[str, str]:
+        """Load persona/decision/interpretation prompt files for a client, if present.
+
+        Same file-based override convention as get_quick_prompt: looks for
+        data/{tid}/{persona,decision,interpretation}.txt, preferring client_id
+        over device_id. Any prompt whose file is missing is simply omitted
+        from the result (caller treats an incomplete set as "no pipeline").
+        """
+        target_ids = []
+        if client_id:
+            target_ids.append(client_id)
+        if device_id:
+            target_ids.append(device_id)
+
+        prompts: Dict[str, str] = {}
+        for tid in target_ids:
+            for key in ("persona", "decision", "interpretation"):
+                if key in prompts:
+                    continue
+                path = os.path.join("data", tid, f"{key}.txt")
+                if os.path.exists(path):
+                    try:
+                        with open(path, "r", encoding="utf-8") as f:
+                            text = f.read().strip()
+                        if text:
+                            prompts[key] = text
+                    except Exception as e:
+                        self.logger.bind(tag=TAG).warning(
+                            f"Failed to load {key} prompt from {path}: {e}"
+                        )
+        return prompts
+
     def _get_current_time_info(self) -> tuple:
         """Get current time info"""
         from .current_time import (
@@ -182,7 +214,7 @@ class PromptManager:
             from core.utils.util import get_ip_info
 
             ip_info = get_ip_info(client_ip, self.logger)
-            city = ip_info.get("city")
+            city = ip_info.get("city") if ip_info else None
             
             if city and city != "Unknown location":
                 location = f"{city}"
@@ -302,6 +334,7 @@ class PromptManager:
 
             # Try to get client_id from kwargs (passed from Connection)
             client_id = kwargs.get("client_id")
+            language = kwargs.pop("language", "en")
 
             if client_ip or client_id:
                 # Get location info (resolves client config internally)

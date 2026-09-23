@@ -46,7 +46,6 @@ from config.manage_api_client import DeviceNotFoundException, DeviceBindExceptio
 from core.utils.prompt_manager import PromptManager
 from core.utils.voiceprint_provider import VoiceprintProvider
 from core.utils import textUtils
-from core.utils.news_rag import news_rag
 from core.utils.history_rag import history_rag
 from core.providers.tools.device_mcp import send_mcp_message
 from plugins_func.functions.get_weather import get_weather
@@ -127,7 +126,6 @@ class ConnectionHandler:
         self.mcp_volume = None
         self.mcp_brightness = None
         self.client_listen_mode = "auto"
-        self.client_aec = False  # 是否启用了服务端AEC
 
         # Thread task related
         self.loop = None  # Get running event loop in handle_connection
@@ -257,9 +255,6 @@ class ConnectionHandler:
 
             # Start timeout check task
             self.timeout_task = asyncio.create_task(self._check_timeout())
-
-            # 启动AEC缓存清理任务
-            self._aec_cache_cleanup_task = asyncio.create_task(self._check_aec_cache_expiry())
 
             self.welcome_msg = self.config["xiaozhi"]
             self.welcome_msg["session_id"] = self.session_id
@@ -418,6 +413,7 @@ class ConnectionHandler:
         try:
             # Extract header info
             timestamp = int.from_bytes(message[8:12], "big")
+            audio_length = int.from_bytes(message[12:16], "big")
 
             # Extract audio data
             if audio_length > 0 and len(message) >= 16 + audio_length:
@@ -431,13 +427,6 @@ class ConnectionHandler:
                 audio_data = message[16:]
                 self.asr_audio_queue.put(audio_data)
                 return True
-
-            # AEC处理：如果timestamp>0且启用了AEC
-            if timestamp > 0 and self.client_aec:
-                pcm_frame = self._apply_aec(timestamp, pcm_frame)
-
-            self.asr_audio_queue.put(pcm_frame)
-            return True
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"Failed to parse WebSocket audio packet: {e}")
 
@@ -1325,7 +1314,6 @@ class ConnectionHandler:
                 intent_result = {
                     "needs_cgm": False,
                     "needs_pump": False,
-                    "needs_news": False,
                     "needs_search": False,
                     "fast_answer": None,
                     "reply": None,
@@ -1470,23 +1458,15 @@ class ConnectionHandler:
                             self.logger.bind(tag=TAG).info(f"Injecting history RAG context for {client_id}")
                             context_list.append(hist_context)
 
-                        # News/CGM RAG from Config
+                        # CGM RAG from Config
                         rag_config_path = os.path.join("data", client_id, "config.json")
                         if os.path.exists(rag_config_path):
                             with open(rag_config_path, "r") as f:
                                 c = json.load(f)
-                                
+
                                 # Use captured intent result (cached from start of chat)
                                 context_needs = intent_result
-                                
-                                # News RAG - only if enabled AND classifier says needed
-                                if c.get("news_rag_enabled") and context_needs.get("needs_news"):
-                                    from core.utils.news_rag import news_rag
-                                    news_context = news_rag.search(search_text)
-                                    if news_context:
-                                        self.logger.bind(tag=TAG).info(f"Injecting news RAG context for {client_id}")
-                                        context_list.append(news_context)
-                                
+
                                 # CGM - Only for clients with "cgm" config object
                                 # Config format: {"cgm": {"api_secret": "...", "user_tz": "..."}}
                                 cgm_config = c.get("cgm")
@@ -1562,7 +1542,6 @@ class ConnectionHandler:
                                 if not any([
                                     context_needs.get("needs_cgm"),
                                     context_needs.get("needs_pump"),
-                                    context_needs.get("needs_news"),
                                     context_needs.get("needs_search"),
                                 ]):
                                     self.logger.bind(tag=TAG).debug(f"Context classifier: no extra injection needed")
@@ -1875,26 +1854,6 @@ class ConnectionHandler:
                             except Exception as e:
                                 self.logger.bind(tag=TAG).error(f"Trigger execution failed: {e}")
                                 
-                        # @@NEWS ...@@
-                        elif "@@NEWS" in trigger_content:
-                            self.logger.bind(tag=TAG).info(f"Detected Stream Trigger: NEWS")
-                            trigger_executed = True
-                            try:
-                                match = re.search(r"@@NEWS[:\s]\s*(.*?)@@", trigger_content)
-                                if match:
-                                    query = match.group(1).strip()
-                                    from core.utils.news_rag import news_rag as nr
-                                    n_text = nr.search(query)
-                                    if not n_text:
-                                        n_text = "I couldn't find any recent news on that topic."
-                                    else:
-                                        n_text = n_text.replace("---\nRELEVANT NEWS CONTEXT:\n", "").replace("\n---", "")
-                                        n_text = "Here is what I found in the news: " + n_text[:500]
-                                    self.tts.tts_one_sentence(self, ContentType.TEXT, content_detail=n_text)
-                                    response_message.append(n_text)
-                            except Exception as e:
-                                self.logger.bind(tag=TAG).error(f"Trigger execution failed: {e}")
-                        
                         # @@VOLUME ...@@
                         elif "@@VOLUME" in trigger_content:
                             self.logger.bind(tag=TAG).info(f"Detected Stream Trigger: VOLUME")
@@ -2751,26 +2710,6 @@ class ConnectionHandler:
             self.logger.bind(tag=TAG).error(f"Timeout check task error: {e}")
         finally:
             self.logger.bind(tag=TAG).info("Timeout check task exited")
-
-    async def _check_aec_cache_expiry(self):
-        """定期清理过期的AEC缓存"""
-        try:
-            while not self.stop_event.is_set():
-                if hasattr(self, "aec_audio_cache") and self.aec_audio_cache:
-                    current_time = time.time()
-                    expired_keys = [
-                        ts for ts, cache_time in list(self.aec_audio_cache_time.items())
-                        if current_time - cache_time > 120  # 2分钟过期
-                    ]
-                    for ts in expired_keys:
-                        self.aec_audio_cache.pop(ts, None)
-                        self.aec_audio_cache_time.pop(ts, None)
-                    if expired_keys:
-                        self.logger.bind(tag=TAG).debug(f"[AEC] 清理过期缓存 {len(expired_keys)} 条")
-                # 每30秒检查一次
-                await asyncio.sleep(30)
-        except Exception as e:
-            self.logger.bind(tag=TAG).error(f"AEC缓存清理任务出错: {e}")
 
     @staticmethod
     def _extract_direct_answer_response(arguments_str):

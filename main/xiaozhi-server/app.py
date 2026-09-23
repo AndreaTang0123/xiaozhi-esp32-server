@@ -10,7 +10,6 @@ from core.http_server import SimpleHttpServer
 from core.websocket_server import WebSocketServer
 from core.utils.util import check_ffmpeg_installed
 from core.utils.gc_manager import get_gc_manager
-from core.utils.npr_scraper import news_scraper_task
 from core.utils.cgm_manager import cgm_background_task
 from core.utils.pump_manager import create_pump_background_task
 
@@ -71,8 +70,6 @@ async def main():
     gc_manager = get_gc_manager(interval_seconds=300)
     await gc_manager.start()
 
-    # Start NPR news scraper
-    scraper_task = asyncio.create_task(news_scraper_task())
     # Start CGM scraper
     cgm_task = asyncio.create_task(cgm_background_task())
     # Start Pump scraper
@@ -152,12 +149,11 @@ async def main():
         if ota_task:
             ota_task.cancel()
 
-        scraper_task.cancel()
         cgm_task.cancel()
         pump_task.cancel()
 
         # Wait for task termination (must add timeout)
-        tasks_to_wait = [stdin_task, ws_task, scraper_task, cgm_task, pump_task]
+        tasks_to_wait = [stdin_task, ws_task, cgm_task, pump_task]
         if ota_task:
             tasks_to_wait.append(ota_task)
 

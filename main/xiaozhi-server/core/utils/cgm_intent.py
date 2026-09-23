@@ -2,7 +2,7 @@
 Context Intent Classifier
 
 Uses the fast intent LLM to determine:
-1. Which context (CGM, Pump, News) should be injected
+1. Which context (CGM, Pump) should be injected
 2. If a query can be answered directly (time, weather, location, volume, brightness, battery)
 3. Whether a diabetes question needs CGM context, pump context, or both
 
@@ -33,7 +33,7 @@ CRITICAL: Use the user's language for 'reply' and 'search_query'.
 IMPORTANT: Put "fast_answer" FIRST in the JSON.
 
 Schema:
-{"fast_answer": "time"|"weather"|"location"|"exit"|"volume"|"brightness"|"battery"|null, "language": "English"|"Chinese", "needs_cgm": bool, "needs_pump": bool, "needs_news": bool, "needs_search": bool, "search_query": string|null, "reply": string}
+{"fast_answer": "time"|"weather"|"location"|"exit"|"volume"|"brightness"|"battery"|null, "language": "English"|"Chinese", "needs_cgm": bool, "needs_pump": bool, "needs_search": bool, "search_query": string|null, "reply": string}
 
 Behavior Rules:
 1. 'weather' -> If user asks for current weather, set "fast_answer": "weather" (internal plugin).
@@ -48,20 +48,19 @@ Behavior Rules:
 10. 'needs_cgm' -> Set true when the user asks about glucose, blood sugar, readings, trends, highs, lows, time in range, glycemic control, patterns, current glucose, or diabetes status inferred from CGM.
 11. 'needs_pump' -> Set true when the user asks about insulin, bolus, basal, temp basal, carb ratio, correction, pump activity, pump profile, insulin effectiveness, or pump-delivered events.
 12. Set BOTH 'needs_cgm' and 'needs_pump' to true when the question requires joint reasoning, such as insulin response, whether a bolus worked, post-meal control, correction effectiveness, or overall diabetes management using both glucose and pump data.
-13. 'needs_news' -> Set true only for explicit news/headlines/current events requests.
-14. For ordinary diabetes coaching or status questions, do NOT set 'needs_search' unless the user is explicitly asking for external knowledge, public information, or recent news.
-15. 'reply' -> A short natural response in the user's language.
+13. For ordinary diabetes coaching or status questions, do NOT set 'needs_search' unless the user is explicitly asking for external knowledge, public information, or recent news.
+14. 'reply' -> A short natural response in the user's language.
 
 Examples:
-- "how's the weather" -> {"fast_answer": "weather", "language": "English", "needs_cgm": false, "needs_pump": false, "needs_news": false, "needs_search": false, "search_query": null, "reply": "Checking the weather for you."}
-- "how are you" -> {"fast_answer": null, "language": "English", "needs_cgm": false, "needs_pump": false, "needs_news": false, "needs_search": false, "search_query": null, "reply": "I'm doing great, thanks for asking!"}
-- "who is Steve Jobs" -> {"fast_answer": null, "language": "English", "needs_cgm": false, "needs_pump": false, "needs_news": false, "needs_search": true, "search_query": "who is Steve Jobs", "reply": "Searching for Steve Jobs..."}
-- "current volume" -> {"fast_answer": "volume", "language": "English", "needs_cgm": false, "needs_pump": false, "needs_news": false, "needs_search": false, "search_query": null, "reply": "Checking the current volume level..."}
-- "How is my glucose today?" -> {"fast_answer": null, "language": "English", "needs_cgm": true, "needs_pump": false, "needs_news": false, "needs_search": false, "search_query": null, "reply": "Let me check your recent glucose data."}
-- "Did my last bolus work?" -> {"fast_answer": null, "language": "English", "needs_cgm": true, "needs_pump": true, "needs_news": false, "needs_search": false, "search_query": null, "reply": "Let me check your recent insulin and glucose response."}
-- "最近胰岛素有没有起作用" -> {"fast_answer": null, "language": "Chinese", "needs_cgm": true, "needs_pump": true, "needs_news": false, "needs_search": false, "search_query": null, "reply": "我来看看你最近的胰岛素和血糖反应。"}
-- "最近血糖控制怎么样" -> {"fast_answer": null, "language": "Chinese", "needs_cgm": true, "needs_pump": false, "needs_news": false, "needs_search": false, "search_query": null, "reply": "我来看看你最近的血糖情况。"}
-- "最近pump有没有异常" -> {"fast_answer": null, "language": "English", "needs_cgm": false, "needs_pump": true, "needs_news": false, "needs_search": false, "search_query": null, "reply": "Let me check your recent pump activity."}
+- "how's the weather" -> {"fast_answer": "weather", "language": "English", "needs_cgm": false, "needs_pump": false, "needs_search": false, "search_query": null, "reply": "Checking the weather for you."}
+- "how are you" -> {"fast_answer": null, "language": "English", "needs_cgm": false, "needs_pump": false, "needs_search": false, "search_query": null, "reply": "I'm doing great, thanks for asking!"}
+- "who is Steve Jobs" -> {"fast_answer": null, "language": "English", "needs_cgm": false, "needs_pump": false, "needs_search": true, "search_query": "who is Steve Jobs", "reply": "Searching for Steve Jobs..."}
+- "current volume" -> {"fast_answer": "volume", "language": "English", "needs_cgm": false, "needs_pump": false, "needs_search": false, "search_query": null, "reply": "Checking the current volume level..."}
+- "How is my glucose today?" -> {"fast_answer": null, "language": "English", "needs_cgm": true, "needs_pump": false, "needs_search": false, "search_query": null, "reply": "Let me check your recent glucose data."}
+- "Did my last bolus work?" -> {"fast_answer": null, "language": "English", "needs_cgm": true, "needs_pump": true, "needs_search": false, "search_query": null, "reply": "Let me check your recent insulin and glucose response."}
+- "最近胰岛素有没有起作用" -> {"fast_answer": null, "language": "Chinese", "needs_cgm": true, "needs_pump": true, "needs_search": false, "search_query": null, "reply": "我来看看你最近的胰岛素和血糖反应。"}
+- "最近血糖控制怎么样" -> {"fast_answer": null, "language": "Chinese", "needs_cgm": true, "needs_pump": false, "needs_search": false, "search_query": null, "reply": "我来看看你最近的血糖情况。"}
+- "最近pump有没有异常" -> {"fast_answer": null, "language": "English", "needs_cgm": false, "needs_pump": true, "needs_search": false, "search_query": null, "reply": "Let me check your recent pump activity."}
 """
 
     def __init__(self, config):
@@ -99,7 +98,6 @@ Examples:
                 "language": "English",
                 "needs_cgm": False,
                 "needs_pump": False,
-                "needs_news": False,
                 "needs_search": False,
                 "search_query": None,
                 "fast_answer": None,
@@ -179,7 +177,6 @@ Examples:
                 "language": str(result.get("language", "English")),
                 "needs_cgm": bool(result.get("needs_cgm", False)),
                 "needs_pump": bool(result.get("needs_pump", False)),
-                "needs_news": bool(result.get("needs_news", False)),
                 "needs_search": bool(result.get("needs_search", False)),
                 "search_query": result.get("search_query"),
                 "fast_answer": result.get("fast_answer"),
@@ -210,7 +207,6 @@ Examples:
                 "language": "English" if "a" <= query_lower[0] <= "z" else "Chinese",
                 "needs_cgm": needs_cgm,
                 "needs_pump": needs_pump,
-                "needs_news": False,
                 "needs_search": False,
                 "search_query": None,
                 "fast_answer": fast_answer,
@@ -327,7 +323,6 @@ def classify_context_needs(query: str, client_id: str, config: dict, language_hi
             "language": "English",
             "needs_cgm": False,
             "needs_pump": False,
-            "needs_news": False,
             "needs_search": False,
             "search_query": None,
             "fast_answer": None,

@@ -159,11 +159,21 @@ class PromptManager:
     def get_pipeline_prompts(self, client_id: str = None, device_id: str = None) -> Dict[str, str]:
         """Load persona/decision/interpretation prompt files for a client, if present.
 
-        Same file-based override convention as get_quick_prompt: looks for
-        data/{tid}/{persona,decision,interpretation}.txt, preferring client_id
-        over device_id. Any prompt whose file is missing is simply omitted
-        from the result (caller treats an incomplete set as "no pipeline").
+        Per-client only (no project-level fallback, so clients without layer
+        files keep their legacy prompt.txt). For each id (client_id first,
+        then device_id), each layer is looked up in this order:
+            data/{tid}/prompts/prompt_{persona,decision,analysis}.txt
+            data/{tid}/prompt_{persona,decision,analysis}.txt
+            data/{tid}/{persona,decision,interpretation}.txt   (older naming)
+        Any prompt whose file is missing is simply omitted from the result
+        (caller treats an incomplete set as "no pipeline").
         """
+        layer_filenames = {
+            "persona": ("prompt_persona.txt", "persona.txt"),
+            "decision": ("prompt_decision.txt", "decision.txt"),
+            "interpretation": ("prompt_analysis.txt", "interpretation.txt"),
+        }
+
         target_ids = []
         if client_id:
             target_ids.append(client_id)
@@ -172,20 +182,36 @@ class PromptManager:
 
         prompts: Dict[str, str] = {}
         for tid in target_ids:
-            for key in ("persona", "decision", "interpretation"):
+            for key, (layer_name, legacy_name) in layer_filenames.items():
                 if key in prompts:
                     continue
-                path = os.path.join("data", tid, f"{key}.txt")
-                if os.path.exists(path):
+                candidates = (
+                    os.path.join("data", tid, "prompts", layer_name),
+                    os.path.join("data", tid, layer_name),
+                    os.path.join("data", tid, legacy_name),
+                )
+                for path in candidates:
+                    if not os.path.exists(path):
+                        continue
                     try:
                         with open(path, "r", encoding="utf-8") as f:
                             text = f.read().strip()
                         if text:
                             prompts[key] = text
+                            self.logger.bind(tag=TAG).info(
+                                f"Loaded {key} prompt from {path} ({len(text)} chars)"
+                            )
+                            break
                     except Exception as e:
                         self.logger.bind(tag=TAG).warning(
                             f"Failed to load {key} prompt from {path}: {e}"
                         )
+
+        if prompts and len(prompts) < len(layer_filenames):
+            missing = [k for k in layer_filenames if k not in prompts]
+            self.logger.bind(tag=TAG).warning(
+                f"Incomplete layered prompts for {target_ids}: missing {missing}, coach pipeline disabled"
+            )
         return prompts
 
     def _get_current_time_info(self) -> tuple:

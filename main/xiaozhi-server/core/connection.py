@@ -121,6 +121,8 @@ class ConnectionHandler:
         # Client status related
         self.client_abort = False
         self.client_is_speaking = False
+        self.client_aec = False  # 客户端 hello 里 features.aec=true 时开启（检测到人声即打断）
+        self.introduced_speakers = set()  # 已在对话里称呼过的说话人（声纹识别用）
         self.mcp_battery = None
         self.mcp_charging = None
         self.mcp_volume = None
@@ -1562,6 +1564,7 @@ class ConnectionHandler:
         if depth == 0:
             self.llm_finish_task = False
             self.sentence_id = str(uuid.uuid4().hex)
+            current_sentence_id = self.sentence_id
             self.suppress_tts = False
 
 
@@ -1766,9 +1769,11 @@ class ConnectionHandler:
                 if not tool_call_flag and content_arguments.startswith("<tool_call>"):
                     tool_call_flag = True
 
-                    if tools_call is not None and len(tools_call) > 0:
-                        tool_call_flag = True
-                        self._merge_tool_calls(tool_calls_list, tools_call)
+                if tools_call is not None and len(tools_call) > 0:
+                    tool_call_flag = True
+                    self._merge_tool_calls(tool_calls_list, tools_call)
+            else:
+                content = response
 
             # --- Thinking Filter Logic ---
             if content:
@@ -2086,11 +2091,21 @@ class ConnectionHandler:
 
             if not bHasError and len(tool_calls_list) > 0:
                 # If LLM needs to process a round first, add related processing logs
+                # 本轮已流式播报的文本，供 _handle_function_result 去重
+                streamed_text = "".join(response_message)
                 if len(response_message) > 0:
                     text_buff = "".join(response_message)
                     self.tts_MessageText = text_buff
                     self.dialogue.put(Message(role="assistant", content=text_buff))
                 response_message.clear()
+
+                # 分离 direct_answer 虚拟工具和真实工具调用
+                direct_answer_calls = [
+                    tc for tc in tool_calls_list if tc.get("name") == "direct_answer"
+                ]
+                real_tool_calls = [
+                    tc for tc in tool_calls_list if tc.get("name") != "direct_answer"
+                ]
 
                 if direct_answer_calls:
                     self.logger.bind(tag=TAG).debug(
@@ -2157,6 +2172,9 @@ class ConnectionHandler:
 
                 # Wait for coroutines to finish (actual wait time is the slowest one)
                 tool_results = []
+                for future, tool_call_data, tool_input in futures_with_data:
+                    result = future.result()
+                    tool_results.append((result, tool_call_data))
 
                 # Unified handling of all tool call results
                 if tool_results:
@@ -2652,17 +2670,20 @@ class ConnectionHandler:
                 f"Cleanup finished: TTS queue size={self.tts.tts_text_queue.qsize()}, audio queue size={self.tts.tts_audio_queue.qsize()}"
             )
 
-    def reset_audio_states(self):
-        """
-        重置所有音频相关状态(VAD + ASR)
-        """
-        # Reset VAD states
+    def reset_vad_states(self):
+        """只重置 VAD 状态（auto 模式下 ASR 取走音频后调用）"""
         self.client_audio_buffer.clear()
         self.client_have_voice = False
         self.client_voice_stop = False
         self.client_voice_window.clear()
         self.last_is_voice = False
         self.vad_last_voice_time = 0.0
+
+    def reset_audio_states(self):
+        """
+        重置所有音频相关状态(VAD + ASR)
+        """
+        self.reset_vad_states()
 
         # Clear ASR buffers
         self.asr_audio.clear()

@@ -145,6 +145,13 @@ class TTSProviderBase(ABC):
         # 使用正则一次性替换，避免重复遍历和部分匹配问题
         if self._correct_words_pattern:
             text = self._correct_words_pattern.sub(lambda m: self.correct_words[m.group(0)], text)
+        # 客户端在 hello 里声明 features.server_tts=false（浏览器自己朗读）：
+        # 不调用 TTS 服务、不产生音频，只入队句子标记，sentence_start 文本和 tts stop 照常下发
+        if not getattr(self.conn, "server_tts_enabled", True):
+            marker_type = SentenceType.FIRST if self._is_first_segment else SentenceType.MIDDLE
+            self._is_first_segment = False
+            self.tts_audio_queue.put((marker_type, None, text))
+            return None
         max_repeat_time = 5
         if self.delete_audio_file:
             # Convert to audio data directly if file needs deletion
@@ -288,6 +295,30 @@ class TTSProviderBase(ABC):
     async def text_to_speak(self, text, output_file):
         pass
 
+    # 最多保留的 sentence_id -> 文本 条目数
+    _TTS_TEXT_KEEP = 20
+
+    def store_tts_text(self, sentence_id, text):
+        """记录某轮对话（sentence_id）的完整回复文本，供上报/日志使用"""
+        if not text:
+            return
+        if self.conn is not None:
+            self.conn.tts_MessageText = text
+        if not sentence_id:
+            return
+        texts = self.__dict__.setdefault("_tts_texts", {})
+        texts.pop(sentence_id, None)
+        texts[sentence_id] = text
+        while len(texts) > self._TTS_TEXT_KEEP:
+            texts.pop(next(iter(texts)))
+
+    def get_tts_text(self, sentence_id):
+        """取回 store_tts_text 记录的文本，没有时回退到 conn.tts_MessageText"""
+        text = self.__dict__.get("_tts_texts", {}).get(sentence_id)
+        if text is None and self.conn is not None:
+            text = getattr(self.conn, "tts_MessageText", "")
+        return text or ""
+
     def audio_to_pcm_data_stream(
         self, audio_file_path, callback: Callable[[Any], Any] = None
     ):
@@ -348,6 +379,9 @@ class TTSProviderBase(ABC):
         while not self.conn.stop_event.is_set():
             try:
                 message = self.tts_text_queue.get(timeout=1)
+                # 新一轮对话开始：清除上一轮 abort 留下的打断标记
+                if message.sentence_type == SentenceType.FIRST:
+                    self.conn.client_abort = False
                 if self.conn.client_abort:
                     logger.bind(tag=TAG).info("Received interrupt signal, terminating TTS text processing thread")
                     continue

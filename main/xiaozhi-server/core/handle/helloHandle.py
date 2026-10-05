@@ -50,6 +50,9 @@ async def handleHelloMessage(conn, msg_json):
     # firmware not to wait for further MCP packets during the handshake)
     features = msg_json.get("features", {})
     conn.features = features
+    conn.client_aec = bool(features.get("aec", False))
+    # 浏览器客户端自己做 TTS 时发 server_tts:false，server 只下发文本不合成语音（见 tts/base.py to_tts_stream）
+    conn.server_tts_enabled = features.get("server_tts", True) is not False
 
     # 3. Generate a Session ID
     session_id = str(uuid.uuid4().hex)

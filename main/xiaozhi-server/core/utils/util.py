@@ -382,13 +382,17 @@ def audio_bytes_to_data_stream(
         pcm_to_data_stream(raw_data, is_opus, callback, sample_rate, opus_encoder)
 
 
-def pcm_to_data_stream(raw_data, is_opus=True, callback: Callable[[Any], Any] = None):
+def pcm_to_data_stream(
+    raw_data, is_opus=True, callback: Callable[[Any], Any] = None, sample_rate=16000, opus_encoder=None
+):
+    # sample_rate / opus_encoder are accepted for caller compatibility but ignored:
+    # every caller resamples raw_data to 16kHz, so encoding must stay at 16kHz
     # Initialize Opus encoder
     encoder = opuslib_next.Encoder(16000, 1, opuslib_next.APPLICATION_AUDIO)
 
     # Encoding parameters
     frame_duration = 60  # 60ms per frame
-    frame_size = int(sample_rate * frame_duration / 1000)  # samples/frame
+    frame_size = int(16000 * frame_duration / 1000)  # 960 samples/frame
 
     # Process all audio data frame by frame (including padding zero for last frame)
     for i in range(0, len(raw_data), frame_size * 2):  # 16bit=2bytes/sample
